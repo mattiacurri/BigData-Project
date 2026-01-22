@@ -2,13 +2,14 @@
 %\usepackage[a4paper, margin=1.2in]{geometry}
 \usepackage[a4paper,top=1.9cm, bottom=1.9cm, right=1.9cm, left=1.9cm]{geometry}
 
-\usepackage[utf8]{inputenc}
+\setcounter{secnumdepth}{1}
+
 \usepackage{amsmath,amssymb}
 \usepackage[amsmath]{ntheorem}
-\usepackage[bitstream-charter]{mathdesign}
-% TODO: Per il font bello, ma serve lualatex per compilare, da risolvere dopo
-% \usepackage{fontspec}
-% \usepackage{unicode-math}
+\usepackage{fontspec}
+\usepackage{unicode-math}
+\setmainfont{TeX Gyre Pagella}
+\setmathfont{TeX Gyre Pagella Math}
 \usepackage[dvipsnames]{xcolor}
 \usepackage{listings}
 \usepackage{courier}
@@ -22,7 +23,6 @@
 \usepackage{setspace}
 \usepackage[skip=10pt plus1pt, indent=0pt]{parskip}
 \usepackage{booktabs}
-\usepackage{svg}
 \usepackage{mathtools}
 \usepackage{annotate-equations}
 \usepackage{subcaption}
@@ -37,6 +37,8 @@
 \usepackage{float}
 \usepackage{enumitem}
 \usepackage[colorlinks=true,linkcolor=black,anchorcolor=black,citecolor=black,filecolor=black,menucolor=black,runcolor=black,urlcolor=black,backref=page]{hyperref}
+\usepackage{emoji}
+% \setemojifont{Noto Color Emoji}
 
 % Titlesec configuration
 \titlespacing\section{0pt}{10pt plus 4pt minus 2pt}{10pt plus 4pt minus 2pt}
@@ -158,7 +160,7 @@ skipabove=1.2\baselineskip,
 \usepackage{titlesec, blindtext, color}
 \definecolor{gray75}{gray}{0.75}
 \newcommand{\hsp}{\hspace{20pt}}
-\titleformat{\chapter}[hang]{\Huge\bfseries}{\selectfont \thechapter\hsp\textcolor{cyan}{|}\hsp}{0pt}{\Huge\bfseries}
+% \titleformat{\chapter}[hang]{\Huge\bfseries}{\selectfont \thechapter\hsp\textcolor{red}{\emoji{open-book}}\hsp}{0pt}{\Huge\bfseries}
 
 \begin{document}
 
@@ -174,6 +176,17 @@ skipabove=1.2\baselineskip,
 %\newpage
 \mainmatter
 
+\input{businessunderstanding}
+\input{dataunderstanding}
+\input{datapreparation}
+\input{modeling}
+\input{evaluation}
+\input{deployment}
+\input{conclusion}
+
 \pagestyle{fancy}
+
+\bibliographystyle{unsrt} % plain, unsrt, alpha, abbrv
+\bibliography{main}
 
 \end{document}

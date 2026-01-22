@@ -1,0 +1,97 @@
+\titleformat{\chapter}[hang]{\Huge\bfseries}{\selectfont \thechapter\hsp\textcolor{red}{\emoji{moneybag}}\hsp}{0pt}{\Huge\bfseries}
+
+\chapter{Business Understanding}
+
+This chapter covers the business understanding phase of the CRISP-DM methodology.
+
+\section{Determine Business Objectives}
+
+\subsection*{Background}
+Social network analysis (SNA) has emerged as a critical pursuit in understanding the complex dynamics of modern online communities. While traditional statistical techniques remain valuable, SNA introduces specialized measures to capture the dependencies between social entities, characterize their behaviors, and assess their impact on the network both structurally and temporally~\cite{tabassumSocialNetworkAnalysis2018}. The fundamental principle of SNA lies in shifting the analytical focus from individual social actors to the relationships and interactions that bind them, revealing patterns that emerge from the network's underlying structure rather than from isolated entities~\cite{tabassumSocialNetworkAnalysis2018}.
+
+In the globalized digital landscape, social networks have become one of the favorite means for modern society to perform social interactions and exchange information via the Internet, allowing people to share their contents without boundaries~\cite{daudApplicationsLinkPrediction2020,pellicaniSAIRUSSpatiallyawareIdentification2023}. Through these platforms, individuals communicate and express their comments, likes, and interests in a fast and easy manner, creating complex connections that can be immediately visualized as large graphs~\cite{daudApplicationsLinkPrediction2020}. This massive spread of social media has introduced unprecedented opportunities for information dissemination~\cite{khanGraphNeuralNetworks2024}. However, this very interconnectedness presents significant challenges: the same platforms that facilitate legitimate social connections also provide powerful tools for malicious activities, including misinformation campaigns, cyberbullying, hate speech propagation, and the radicalization of vulnerable individuals~\cite{benedettiMultiviewLearningIdentification2025,pellicaniSAIRUSSpatiallyawareIdentification2023,khanGraphNeuralNetworks2024,benedettiIMMENSEInductiveMultiperspective2025}.
+
+Risky users exploit the spreading power of social networks for illegal or harmful activities such as inciting religious or political extremism, disseminating disinformation, or recruiting. For these reasons, detecting them has become a fundamental task for ensuring the safe use of these platforms~\cite{pellicaniSAIRUSSpatiallyawareIdentification2023,benedettiMultiviewLearningIdentification2025,benedettiIMMENSEInductiveMultiperspective2025}. This challenge is particularly acute when dealing with borderline users who appear risky from certain perspectives but not from others, and is further complicated by the dynamic nature of social networks~\cite{pellicaniSAIRUSSpatiallyawareIdentification2023,benedettiMultiviewLearningIdentification2025}. User relationships, content semantics, and behavioral patterns continuously evolve; models that treat networks as static entities fail to capture users who transition from safe to radicalized behavior over time~\cite{benedettiMultiviewLearningIdentification2025}.
+
+The unstructured nature of user interactions on social media platforms renders manual identification of malicious actors both tedious and impractical at scale~\cite{khanGraphNeuralNetworks2024}. Recent research has increasingly focused on leveraging graph-based representations, where users constitute nodes and their interactions form edges, to address this complexity~\cite{khanGraphNeuralNetworks2024,corizzoHURIHybridUser2023}. Link prediction, defined as the process of predicting future connections between pairs of unconnected links based on existing connections~\cite{daudApplicationsLinkPrediction2020}, represents a fundamental problem in network analysis that has evolved from static snapshot-based approaches to temporal methodologies that exploit multiple network states across time to predict future or re-occurring connections~\cite{tabassumSocialNetworkAnalysis2018,daudApplicationsLinkPrediction2020}. This temporal perspective aligns with the recognition that real-world networks are not static but dynamic and continuously evolving, requiring analytical frameworks that can capture growth patterns and temporal dependencies~\cite{tabassumSocialNetworkAnalysis2018}.
+
+Given the urgency of protecting society from exposure to discriminatory, hateful, and violent content at the massive scale of contemporary social networks, there is a critical need for effective automated systems to assist Law Enforcement Agencies in identifying and addressing users who disseminate malicious content~\cite{benedettiIMMENSEInductiveMultiperspective2025}. This work addresses this need by developing methods that integrate multiple perspectives of user behavior, account for the temporal evolution of networks, and leverage the relational structure inherent in social media platforms to enable accurate and timely identification of risky users.
+
+
+\subsection*{Business Goals}
+The primary business goal of this project is to develop an effective temporal link prediction system for social networks that can:
+
+\begin{itemize}
+    \item Predict future connections between users based on their historical interactions and content
+    \item Evaluate the effectiveness of incremental learning approaches for temporal network evolution
+    \item Given a dataset of users and relative posts, generate realistic synthetic social network structures
+    \item Provide insights into how network properties evolve over time
+\end{itemize}
+
+\subsection*{Business Success Criteria}
+The project will be considered successful if it achieves the following outcomes:
+
+\begin{itemize}
+    \item Development of a temporal link prediction model based on EvolveGCN
+    \item Quantitative comparison of model performance using standard metrics (Mean Average Precision, AUC, Precision, Recall, F1)
+    \item Successful transfer learning application: trained models can generate plausible network structures on synthetic datasets
+    \item Analysis of network evolution patterns and structural properties across temporal snapshots
+    \item Generation of a large synthetic network of 1000 artificial users with realistic connection patterns
+\end{itemize}
+
+\section{Assess Situation}
+
+\subsection*{Inventory of Resources}
+
+The available data are being collected from the social network platform Gab\footnote{\url{https://gab.com/}}, known for its minimal content moderation policies and popularity among far-right communities. The dataset includes user profiles, posts, and interaction data (likes, comments, shares) over a defined time period.
+
+Current resources available for the project are the following machines:
+
+\begin{enumerate}
+    \item CPU: AMD Ryzen 7 7700, 8 cores, 16 threads; GPU: NVIDIA RTX 5060Ti, 16 GB VRAM; RAM: 48 GB
+    \item CPU: AMD Ryzen 7 7840HS, 8 cores, 16 threads; GPU: Integrated AMD Radeon 780M; RAM: 48 GB
+    \item CPU: Intel Core i7-10750H, 6 cores, 12 threads; GPU: NVIDIA GTX 1650 Mobile Max-Q, 4 GB VRAM; RAM: 16 GB
+\end{enumerate}
+
+\subsection*{Identify Constraints}
+
+There are no significant constraints anticipated for this project. However, potential challenges include:
+
+\begin{itemize}
+    \item Data Quality: The collected data may contain noise, missing values, or inconsistencies that could affect model performance.
+    \item Computational Resources: Training complex models on large datasets may require significant computational power and time.
+    \item Ethical Considerations: Handling user data requires adherence to privacy regulations and ethical guidelines to ensure responsible use of information.
+\end{itemize}
+
+\subsection*{Assumptions}
+
+\begin{itemize}
+    \item The dataset from Gab is representative of broader social network dynamics and user behaviors.
+    \item A connection between users exists if they are connected in one snapshot
+    \item Graphs are undirected and unweighted
+    \item If a connection exists between two users in a snapshot, it will also exist in all subsequent snapshots
+\end{itemize}
+
+
+\section{Determine Data Mining Goals}
+
+\subsection*{Data Mining Goals}
+
+Here we translate the business goals into specific data mining objectives:
+
+\begin{itemize}
+    \item Develop a temporal link prediction model using EvolveGCN to forecast future user connections based on historical interaction data.
+    \item Evaluate the model's performance using metrics such as Mean Average Precision (MAP), Area Under the Curve (AUC), Precision, Recall, and F1-score.
+    \item Adapt and test the trained model for generating synthetic social network structures.
+    \item Analyze the temporal evolution of network properties, including degree distribution, clustering coefficient, and average path length.
+\end{itemize}
+
+\subsection*{Success Criteria}
+
+The success of the data mining efforts will be measured by:
+
+\begin{itemize}
+    \item Achieving high performance on link prediction tasks
+    \item Demonstrating the model's ability to generalize to synthetic datasets, producing realistic network structures.
+    \item Providing comprehensive insights into the temporal dynamics of the social network through detailed analysis of evolving network metrics.
+\end{itemize}

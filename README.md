@@ -27,21 +27,17 @@ Studying the temporal evolution in link prediction of risky users in social netw
 │                         `1.0-jqp-initial-data-exploration`.
 │
 ├── pyproject.toml     <- Project configuration file with package metadata for 
-│                         bigdata_project and configuration for tools like black
+│                         src and configuration for tools like black
 │
 ├── references         <- Data dictionaries, manuals, and all other explanatory materials.
 │
 ├── reports            <- Generated analysis as HTML, PDF, LaTeX, etc.
 │   └── figures        <- Generated graphics and figures to be used in reporting
 │
-├── requirements.txt   <- The requirements file for reproducing the analysis environment, e.g.
-│                         generated with `pip freeze > requirements.txt`
 │
-├── setup.cfg          <- Configuration file for flake8
-│
-└── bigdata_project   <- Source code for use in this project.
+└── src   <- Source code for use in this project.
     │
-    ├── __init__.py             <- Makes bigdata_project a Python module
+    ├── __init__.py             <- Makes src a Python module
     │
     ├── config.py               <- Store useful variables and configuration
     │
