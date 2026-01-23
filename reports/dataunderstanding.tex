@@ -5,13 +5,407 @@
 This chapter covers the data understanding phase of the CRISP-DM methodology.
 
 \section{Collect Initial Data}
-Collect initial data from relevant sources.
+
+The available data are being collected from the social network platform Gab\footnote{\url{https://gab.com/}}. The dataset includes several snapshots, in particular, \texttt{2016-2021}, \texttt{2022}, \texttt{2023}, \texttt{2024}, \texttt{January-July 2025} and \texttt{July 2025}. For every snapshot, there three files:
+
+\begin{itemize}
+    \item \texttt{posts\_current\_snapshot.csv}: contains all the posts made by users in the platform for that snapshot; 
+    \item \texttt{posts\_incremental.csv}: contains all the posts made by users in the platform since the previous snapshots up to the current one;
+    \item \texttt{social\_network.edg}: contains the social network graph in edge list format, where every line represents a directed edge from a follower to a followee (X follows Y).
+\end{itemize}
+
+Along with them, there are also 3 synthetic batches for the subsequent task of using the trained model on the original data to generate links.
+
+For both the datasets, the embedding has been provided, computed using a BERT model.
 
 \section{Describe Data}
-Describe the data structure, format, and characteristics.
 
-\section{Verify Data Quality}
-Verify data quality by checking for errors, missing values, and inconsistencies.
+Raw data files are in CSV format, with the exception of the social network graph which is in edge list format. For each post, the following attributes are available:
+
+\begin{itemize}
+    \item \texttt{unnamed\_0} (autoincrement): index of the post, autoincremented
+    \item \texttt{id} (integer): unique identifier of the post
+    \item \texttt{content} (string): text of the post
+    \item \texttt{account\_id} (integer): unique identifier of the user who made the post
+    \item \texttt{created\_at} (string): ISO 8601 timestamp of when the post was created
+    \item \texttt{language} (string): language code of the post
+    \item \texttt{replies\_count} (integer): number of replies to the post
+    \item \texttt{reblogs\_count} (integer): number of reblogs of the post
+    \item \texttt{reactions\_counts} (string): JSON dictionary of reactions to the post
+    \item \texttt{quotes\_count} (integer): number of quotes of the post
+    \item \texttt{timestamp} (string): ISO 8601 timestamp of the post (\texttt{created\_at} + timezone)
+\end{itemize}
+
 
 \section{Explore Data}
-Explore data to gain initial insights and identify patterns.
+
+The exploration of the dataset involves analyzing temporal patterns, content characteristics, user engagement, and activity distributions across all snapshots.
+
+\subsection{Temporal Distribution}
+
+The dataset spans from August 22, 2016 to August 2, 2025, covering a period of approximately 9 years. Table~\ref{tab:temporal_distribution} summarizes the temporal distribution across all snapshots.
+
+\begin{table}[H]
+    \centering
+    \caption{Temporal distribution of posts across snapshots}
+    \label{tab:temporal_distribution}
+    \begin{tabular}{lrrr}
+        \toprule
+        \textbf{Snapshot} & \textbf{Posts} & \textbf{Time Span (days)} & \textbf{Max Gap (days)} \\
+        \midrule
+        2016-2021 & 18,926 & 1,957 & 49 \\
+        2022 & 13,108 & 364 & $<$1 \\
+        2023 & 13,376 & 364 & $<$1 \\
+        2024 & 13,400 & 365 & $<$1 \\
+        Jan-Jul 25 & 44,878 & 180 & $<$1 \\
+        Jul 25 & 78,857 & 32 & $<$1 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+The early snapshot (2016-2021) shows significant temporal gaps, with 39 gaps of 7 or more days detected, reflecting the sparse data collection in the platform's early years. From 2022 onwards, the data collection became more consistent, with no gaps exceeding one day. The volume of posts shows a marked increase over time, with the Jul 25 snapshot alone containing more posts than all previous years combined.
+
+Figure~\ref{fig:temporal_distribution} visualizes the temporal distribution of posts across all snapshots, showing a clear growth trend with an exponential increase in 2025.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figures/07_temporal_distribution_AGGREGATED.png}
+    \caption{Temporal distribution of posts across the aggregated dataset (2016-2025). The histogram shows monthly post counts with a clear exponential growth pattern, particularly evident in 2025.}
+    \label{fig:temporal_distribution}
+\end{figure}
+
+\subsection{Language Distribution}
+
+The dataset is predominantly English, with 97.01\% of posts (177,085 out of 182,545) written in English. A total of 80 unique languages were detected across all snapshots. Table~\ref{tab:language_distribution} shows the top languages.
+
+\begin{table}[H]
+    \centering
+    \caption{Top 10 languages in the aggregated dataset}
+    \label{tab:language_distribution}
+    \begin{tabular}{lrr}
+        \toprule
+        \textbf{Language} & \textbf{Posts} & \textbf{Percentage} \\
+        \midrule
+        English (en) & 177,085 & 97.01\% \\
+        French (fr) & 994 & 0.54\% \\
+        Unknown & 877 & 0.48\% \\
+        German (de) & 823 & 0.45\% \\
+        Spanish (es) & 429 & 0.24\% \\
+        Japanese (ja) & 348 & 0.19\% \\
+        Italian (it) & 252 & 0.14\% \\
+        Portuguese (pt) & 230 & 0.13\% \\
+        Dutch (nl) & 202 & 0.11\% \\
+        Polish (pl) & 125 & 0.07\% \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+The English dominance increased over time, from 92.18\% in 2016-2021 to 98.70\% in Jan-Jul 25, suggesting the platform's user base became increasingly anglophone.
+
+Figure~\ref{fig:language_distribution} shows the language distribution as a pie chart, highlighting the overwhelming dominance of English content.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.7\textwidth]{figures/14_language_distribution_AGGREGATED.png}
+    \caption{Language distribution in the aggregated dataset. English dominates with 97\% of all posts, followed by French (0.5\%), unknown languages (0.5\%), and German (0.5\%).}
+    \label{fig:language_distribution}
+\end{figure}
+
+\subsection{Content Characteristics}
+
+\subsubsection{Text Length Analysis}
+
+Post content varies significantly in length. Table~\ref{tab:text_length_stats} summarizes the text length statistics.
+
+\begin{table}[H]
+    \centering
+    \caption{Text length statistics (characters) across the aggregated dataset}
+    \label{tab:text_length_stats}
+    \begin{tabular}{lr}
+        \toprule
+        \textbf{Statistic} & \textbf{Value} \\
+        \midrule
+        Mean & 247.38 \\
+        Std. Deviation & 552.45 \\
+        Minimum & 1 \\
+        25th Percentile & 37 \\
+        Median & 89 \\
+        75th Percentile & 213 \\
+        Maximum & 11,753 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\begin{itemize}
+    \item No empty posts were found in the dataset;
+    \item Very short posts (1-9 characters) account for approximately 4-5\% of posts per snapshot;
+    \item Very long posts ($>$1,000 characters) represent a small but consistent portion, with 9,456 posts total.
+\end{itemize}
+
+The average word count is 35.4 words per post, with a median of 13 words, indicating a right-skewed distribution typical of social media platforms.
+
+Figure~\ref{fig:text_length} illustrates the text length distribution, showing the characteristic long-tail pattern.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figures/21_text_length_AGGREGATED.png}
+    \caption{Text length distribution (aggregated). The histogram shows character count distribution with a log-scale y-axis, revealing a heavy right-skewed distribution where most posts are short (under 500 characters) but some extend to over 10,000 characters.}
+    \label{fig:text_length}
+\end{figure}
+
+\subsubsection{URL, Hashtag, and Mention Analysis}
+
+Interestingly, the content shows minimal use of URLs, hashtags, and mentions:
+\begin{itemize}
+    \item Posts containing URLs: 7 ($<$0.01\%)
+    \item Posts containing hashtags: 0 (0.00\%)
+    \item Posts containing mentions: 0 (0.00\%)
+\end{itemize}
+
+This suggests that the content has been preprocessed to remove or normalize such elements, or reflects a specific subset of posts that does not include these features.
+
+\subsection{Engagement Metrics}
+
+User engagement is measured through replies, reblogs, and quotes. Table~\ref{tab:engagement_stats} presents the engagement statistics for the aggregated dataset.
+
+\begin{table}[H]
+    \centering
+    \caption{Engagement statistics for the aggregated dataset}
+    \label{tab:engagement_stats}
+    \begin{tabular}{lrrr}
+        \toprule
+        \textbf{Metric} & \textbf{Mean} & \textbf{Median} & \textbf{Max} \\
+        \midrule
+        Replies & 8.47 & 0 & 22,211 \\
+        Reblogs & 28.94 & 1 & 24,464 \\
+        Quotes & 1.56 & 0 & 2,292 \\
+        Total Engagement & 38.98 & 3 & 34,656 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+A significant portion of posts (28.06\%) have zero engagement, while a small number of viral posts drive the high averages. Engagement metrics show a declining trend over time: the 2016-2021 snapshot shows an average total engagement of 156 per post, while the Jul 25 snapshot shows only 7.78, indicating either platform changes or sampling methodology differences.
+
+Figure~\ref{fig:engagement_distribution} visualizes the engagement distribution, highlighting the heavy-tailed nature of social media interactions.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figures/42_engagement_distribution_AGGREGATED.png}
+    \caption{Engagement metrics distribution (aggregated). Box plots show replies, reblogs, and quotes counts on a log scale, revealing extreme outliers and the highly skewed nature of engagement metrics.}
+    \label{fig:engagement_distribution}
+\end{figure}
+
+\subsection{Reactions Analysis}
+
+Reactions provide insight into user sentiment. The platform supports multiple reaction types, with reaction type ``1'' (likely a ``like'' equivalent) being dominant, accounting for over 90\% of all reactions. Posts with no reactions represent 23.11\% of the dataset. The average number of reactions per post is 62.22, with a highly skewed distribution (median of 3).
+
+Figure~\ref{fig:reactions} shows the distribution of reaction types across the aggregated dataset.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/49_reactions_AGGREGATED.png}
+    \caption{Reaction types distribution (aggregated). The bar chart shows counts per reaction type on a log scale, with type ``1'' (standard like) dominating overwhelmingly, followed by types ``11'', ``4'', and ``6''.}
+    \label{fig:reactions}
+\end{figure}
+
+\subsection{User Activity Patterns}
+
+The dataset contains posts from 27,002 unique users, with an average of 6.76 posts per user. Table~\ref{tab:user_activity} categorizes users by activity level.
+
+\begin{table}[H]
+    \centering
+    \caption{User activity categories}
+    \label{tab:user_activity}
+    \begin{tabular}{lrr}
+        \toprule
+        \textbf{Category} & \textbf{Users} & \textbf{Percentage} \\
+        \midrule
+        Single post users & 10,179 & 37.70\% \\
+        Casual users (2-10 posts) & 12,558 & 46.51\% \\
+        Active users (11-100 posts) & 4,149 & 15.37\% \\
+        Power users ($>$100 posts) & 116 & 0.43\% \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+The top 1\% of users contribute disproportionately to the content: the top 10 most active users generated a combined 4,394 posts. The most active user (account\_id 3652359) authored 743 posts across all snapshots.
+
+Figure~\ref{fig:user_activity} illustrates the user activity distribution, showing the typical power-law pattern where few users contribute most content.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figures/50_user_activity_distribution.png}
+    \caption{User activity distribution (aggregated). The cumulative distribution shows that approximately 85\% of users posted 10 or fewer times, while a small fraction of power users account for a disproportionate share of total posts.}
+    \label{fig:user_activity}
+\end{figure}
+
+\subsection{Content Analysis: Word Clouds and N-grams}
+
+To better understand the topics discussed on the platform, word frequency analysis was performed. Figure~\ref{fig:wordcloud} presents a word cloud visualization of the most frequent terms in the aggregated dataset.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.8\textwidth]{figures/35_wordcloud_AGGREGATED.png}
+    \caption{Word cloud of the aggregated dataset. Prominent terms include political figures, common verbs, and thematic keywords reflecting the platform's discourse patterns.}
+    \label{fig:wordcloud}
+\end{figure}
+
+Figure~\ref{fig:word_bigram} shows the top words and bigrams, providing insight into the most common single terms and two-word phrases.
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.9\textwidth]{figures/28_word_bigram_AGGREGATED.png}
+    \caption{Top 20 words and bigrams (aggregated). The left panel shows the most frequent single words, while the right panel displays the most common two-word phrases, revealing common discourse patterns.}
+    \label{fig:word_bigram}
+\end{figure}
+
+
+\section{Verify Data Quality}
+
+Data quality verification examines completeness, consistency, accuracy, and potential issues in the dataset.
+
+\subsection{Completeness Analysis}
+
+\subsubsection{Missing Values}
+
+The dataset shows excellent completeness for most attributes. The only attribute with missing values is \texttt{language}, with 877 missing values (0.48\%) in the aggregated current snapshots and 3,747 (0.85\%) in the incremental data. All other attributes are 100\% complete.
+
+\begin{table}[H]
+    \centering
+    \caption{Missing values summary (aggregated current snapshots)}
+    \label{tab:missing_values}
+    \begin{tabular}{lrr}
+        \toprule
+        \textbf{Attribute} & \textbf{Missing Count} & \textbf{Missing \%} \\
+        \midrule
+        language & 877 & 0.48\% \\
+        All other attributes & 0 & 0.00\% \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+The missing \texttt{language} values likely correspond to posts where automatic language detection failed, possibly due to very short content, mixed-language posts, or non-standard text.
+
+\subsubsection{No Empty Content}
+
+Importantly, no posts with empty \texttt{content} fields were found, ensuring all records contain textual data for analysis.
+
+\subsection{Consistency Checks}
+
+\subsubsection{Snapshot vs. Incremental Consistency}
+
+A critical quality check verified that each current snapshot is fully contained within its corresponding incremental file. All six snapshots achieved 100\% coverage:
+
+\begin{table}[H]
+    \centering
+    \caption{Snapshot-incremental consistency verification}
+    \label{tab:consistency}
+    \begin{tabular}{lrrr}
+        \toprule
+        \textbf{Snapshot} & \textbf{Snapshot Posts} & \textbf{Incremental Posts} & \textbf{Coverage} \\
+        \midrule
+        2016-2021 & 18,926 & 18,926 & 100\% \\
+        2022 & 13,108 & 32,034 & 100\% \\
+        2023 & 13,376 & 45,410 & 100\% \\
+        2024 & 13,400 & 58,810 & 100\% \\
+        Jan-Jul 25 & 44,878 & 103,688 & 100\% \\
+        Jul 25 & 78,857 & 182,545 & 100\% \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsubsection{Temporal Consistency}
+
+The \texttt{created\_at} and \texttt{timestamp} fields are identical across all snapshots, confirming consistent timestamp handling. No posts with future dates were detected.
+
+\subsubsection{Unique Identifiers}
+
+No duplicate post IDs were found, either within individual snapshots or across the aggregated dataset. Each post maintains a unique identifier throughout the dataset.
+
+\subsection{Duplicate Content Analysis}
+
+While post IDs are unique, content-level duplicates exist in the dataset. Table~\ref{tab:duplicates} summarizes the duplicate content findings.
+
+\begin{table}[H]
+    \centering
+    \caption{Duplicate content analysis per snapshot}
+    \label{tab:duplicates}
+    \begin{tabular}{lrr}
+        \toprule
+        \textbf{Snapshot} & \textbf{Duplicate Posts} & \textbf{Percentage} \\
+        \midrule
+        2016-2021 & 339 & 1.79\% \\
+        2022 & 396 & 3.02\% \\
+        2023 & 563 & 4.21\% \\
+        2024 & 563 & 4.20\% \\
+        Jan-Jul 25 & 3,377 & 7.52\% \\
+        Jul 25 & 7,919 & 10.04\% \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+The increasing duplicate rate over time suggests growing repetitive posting behavior, possibly including:
+\begin{itemize}
+    \item Users reposting the same content multiple times;
+    \item Common phrases or memes shared by different users;
+    \item Automated or bot-like posting patterns.
+\end{itemize}
+
+Importantly, no completely duplicate rows (excluding ID) were found, meaning each post has unique metadata even when content is identical.
+
+\subsection{Data Type Verification}
+
+All attributes maintain consistent data types across snapshots:
+\begin{itemize}
+    \item Numeric fields (\texttt{id}, \texttt{account\_id}, \texttt{replies\_count}, \texttt{reblogs\_count}, \texttt{quotes\_count}): \texttt{int64}
+    \item Text fields (\texttt{content}, \texttt{language}, \texttt{created\_at}, \texttt{timestamp}, \texttt{reactions\_counts}): \texttt{str}
+\end{itemize}
+
+\subsection{Encoding Issues}
+
+No encoding issues were detected in the text content. The dataset appears to be properly UTF-8 encoded, with no problematic character sequences found during quality checks.
+
+\subsection{Outlier Detection}
+
+Several extreme values were identified but are considered legitimate data points:
+\begin{itemize}
+    \item Maximum replies: 22,211 (highly viral post)
+    \item Maximum reblogs: 24,464 (highly viral post)  
+    \item Maximum reactions: 116,141 (exceptionally popular content)
+    \item Maximum text length: 11,753 characters (long-form content)
+\end{itemize}
+
+These outliers represent the heavy-tailed distribution typical of social media engagement, where a small number of viral posts receive disproportionate attention.
+
+\subsection{Summary of Data Quality}
+
+The dataset demonstrates high overall quality:
+\begin{itemize}
+    \item \textbf{Completeness}: 99.52\% complete (only \texttt{language} has missing values)
+    \item \textbf{Consistency}: 100\% snapshot-incremental consistency; unique IDs throughout
+    \item \textbf{Accuracy}: No encoding issues; timestamps properly formatted
+    \item \textbf{Timeliness}: Data spans 2016-2025 with recent snapshots being most comprehensive
+\end{itemize}
+
+Areas requiring attention during data preparation include:
+\begin{enumerate}
+    \item Handling the 0.48\% missing \texttt{language} values (imputation or filtering)
+    \item Addressing content duplicates based on analysis objectives
+    \item Considering the heavy-tailed engagement distributions for modeling purposes
+\end{enumerate}
+
+\section{Summary}
+
+The data understanding phase revealed a rich dataset of 182,545 posts from the Gab social network, spanning nearly a decade (2016-2025). Key findings include:
+
+\begin{itemize}
+    \item \textbf{Growth pattern}: The platform shows exponential growth, with 2025 data alone representing 68\% of all posts
+    \item \textbf{Language homogeneity}: 97\% English content, making it suitable for single-language NLP tasks
+    \item \textbf{Content characteristics}: Short-form content dominates (median 89 characters, 13 words) with heavy-tailed distributions
+    \item \textbf{Engagement patterns}: Highly skewed distributions with 28\% zero-engagement posts and viral outliers reaching 20,000+ interactions
+    \item \textbf{User dynamics}: Power-law distribution with 0.43\% of users (116 power users) driving significant content volume
+    \item \textbf{Data quality}: High completeness (99.52\%) with only the \texttt{language} field showing missing values; perfect snapshot-incremental consistency
+    \item \textbf{Duplicate trend}: Increasing content duplication over time (from 1.79\% to 10.04\%), suggesting potential bot activity or viral content resharing
+\end{itemize}
+
+The dataset is well-suited for link prediction and social network analysis tasks, with the temporal snapshots enabling longitudinal studies of network evolution. The preprocessing pipeline should address the minor missing values and consider strategies for handling the heavy-tailed engagement distributions.
