@@ -215,3 +215,4 @@ cython_debug/
 .vscode/
 .github/
 notebook_outputs/
+log/

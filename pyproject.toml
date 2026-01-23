@@ -22,6 +22,10 @@ dependencies = [
     "python-dotenv",
     "seaborn>=0.13.2",
     "wordcloud>=1.9.6",
+    "pyyaml>=6.0.3",
+    "scikit-learn>=1.8.0",
+    "torch>=2.9.1",
+    "tqdm>=4.67.1",
 ]
 requires-python = "~=3.12.0"
 
@@ -33,10 +37,16 @@ include = ["pyproject.toml", "src/**/*.py"]
 
 [tool.ruff.lint]
 extend-select = ["I"]  # Add import sorting
+# Enable all `pydocstyle` rules, limiting to those that adhere to the
+# Google convention via `convention = "google"`, below.
+select = ["D"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]
 force-sort-within-sections = true
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
 
 [dependency-groups]
 dev = [
@@ -44,4 +54,15 @@ dev = [
     "ruff",
     "ty"
 ]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-gpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-gpu"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
 
