@@ -8,6 +8,80 @@ This chapter covers the modeling phase of the CRISP-DM methodology.
 
 \section{Select Modeling Techniques}
 
+For dynamic graph analysis, we selected \textbf{EvolveGCN} (Evolving Graph Convolutional Networks) \cite{parejaEvolveGCNEvolvingGraph2020} as our primary modeling approach. This technique addresses a critical limitation of existing methods: the requirement for nodes to be present throughout the entire time span (training and testing), making them less applicable when node sets frequently change or completely differ between time steps.
+
+\subsection*{Motivation and Context}
+
+Traditional graph neural network approaches for dynamic graphs typically resort to node embeddings and use recurrent neural networks to regulate these embeddings and learn temporal dynamics. However, this approach faces significant challenges in practical scenarios where:
+
+\begin{itemize}
+    \item New nodes emerge after training
+    \item Nodes frequently appear and disappear
+    \item Node sets at different time steps may completely differ
+\end{itemize}
+
+EvolveGCN resolves these challenges by focusing on model adaptation rather than node embeddings. Instead of using RNNs to learn dynamics from node features extracted by GNNs, EvolveGCN uses RNNs to regulate the GCN model (network parameters) at every time step \cite{parejaEvolveGCNEvolvingGraph2020}. This approach effectively performs model adaptation without requiring nodes to be present throughout the entire time span, making it suitable for our social network analysis where users may join or leave the platform.
+
+\subsection*{Architecture Overview}
+
+EvolveGCN adapts the Graph Convolutional Network (GCN) model along the temporal dimension without resorting to node embeddings. The proposed approach captures the dynamism of the graph sequence through using an RNN to evolve the GCN parameters, with two architectures considered for parameter evolution \cite{parejaEvolveGCNEvolvingGraph2020}.
+
+At each time step $t$, the input data consists of the pair $(A_t \in \mathbb{R}^{n \times n}, X_t \in \mathbb{R}^{n \times d})$, where $A_t$ is the graph adjacency matrix and $X_t$ is the matrix of node features (each row is a $d$-dimensional feature vector).
+
+\subsection*{Graph Convolution Layer}
+
+A GCN consists of multiple layers of graph convolution, which is similar to a perceptron but additionally has a neighborhood aggregation step motivated by spectral convolution. At time $t$, the $l$-th layer takes the adjacency matrix $A_t$ and the node embedding matrix $H_t^{(l)}$ as input, and uses a weight matrix $W_t^{(l)}$ to update the node embedding matrix to $H_t^{(l+1)}$ as output:
+
+\begin{equation}
+H_t^{(l+1)} = \text{GCONV}(A_t, H_t^{(l)}, W_t^{(l)}) := \sigma(\hat{A}_t H_t^{(l)} W_t^{(l)})
+\end{equation}
+
+where $\hat{A}_t$ is a normalization of $A_t$ defined as:
+
+\begin{equation}
+\hat{A} = \tilde{D}^{-\frac{1}{2}} \tilde{A} \tilde{D}^{-\frac{1}{2}}, \quad \tilde{A} = A + I, \quad \tilde{D} = \text{diag}\left(\sum_j \tilde{A}_{ij}\right)
+\end{equation}
+
+and $\sigma$ is the activation function (typically ReLU) for all but the output layer. The initial embedding matrix comes from the node features: $H_t^{(0)} = X_t$. For a GCN with $L$ layers, the output layer function $\sigma$ may be the identity (producing high-level node representations) or softmax (for node classification probabilities).
+
+\subsection*{Weight Evolution Mechanisms}
+
+At the heart of the proposed method is the update of the weight matrix $W_t^{(l)}$ at time $t$ based on current as well as historical information. This requirement can be naturally fulfilled by using a recurrent architecture, with two options.
+
+\paragraph{EvolveGCN-H (Hidden State Version):} The first option treats $W_t^{(l)}$ as the hidden state of the dynamical system. A Gated Recurrent Unit (GRU) is used to update the hidden state upon time-$t$ input to the system, where the input information is naturally the node embeddings $H_t^{(l)}$:
+
+\begin{equation}
+W_t^{(l)} = \text{GRU}(H_t^{(l)}, W_{t-1}^{(l)})
+\end{equation}
+
+The implementation requires two extensions from standard GRU: (a) extending inputs and hidden states from vectors to matrices (because the hidden state is now the GCN weight matrices), and (b) matching the column dimension of the input with that of the hidden state. This is achieved through a summarization function that condenses the node embedding matrix $H_t^{(l)}$ into a matrix with appropriate dimensions using a learned parameter vector to compute weights for the rows, selecting the top-$k$ weighted rows.
+
+\paragraph{EvolveGCN-O (Output Version):} The second option treats $W_t^{(l)}$ as the output of the dynamical system (which becomes the input at the subsequent time step). A Long Short-Term Memory (LSTM) cell models this input-output relationship, maintaining system information through a cell context that acts like the hidden state of a GRU:
+
+\begin{equation}
+W_t^{(l)} = \text{LSTM}(W_{t-1}^{(l)})
+\end{equation}
+
+In this version, node embeddings are not used at all. Implementing the -O version requires only a straightforward extension of the standard LSTM from the vector version to the matrix version.
+
+\subsection*{Evolving Graph Convolution Unit (EGCU)}
+
+Combining the graph convolution unit GCONV and a recurrent architecture, we reach the Evolving Graph Convolution Unit (EGCU). Depending on the way GCN weights are evolved, we have two versions:
+
+For EvolveGCN-H:
+\begin{align}
+W_t^{(l)} &= \text{GRU}(H_t^{(l)}, W_{t-1}^{(l)}) \\
+H_t^{(l+1)} &= \text{GCONV}(A_t, H_t^{(l)}, W_t^{(l)})
+\end{align}
+
+For EvolveGCN-O:
+\begin{align}
+W_t^{(l)} &= \text{LSTM}(W_{t-1}^{(l)}) \\
+H_t^{(l+1)} &= \text{GCONV}(A_t, H_t^{(l)}, W_t^{(l)})
+\end{align}
+
+In the -H version, the GCN weights are treated as hidden states of the recurrent architecture; in the -O version, these weights are treated as input/outputs. Chaining the units bottom-up creates a GCN with multiple layers for one time step, and unrolling over time horizontally forms a lattice on which information ($H_t^{(l)}$ and $W_t^{(l)}$) flows.
+
 \section{Generate Test Design} 
 
 \section{Build Model} 
