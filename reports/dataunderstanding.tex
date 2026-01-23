@@ -41,7 +41,7 @@ Raw data files are in CSV format, with the exception of the social network graph
 
 The exploration of the dataset involves analyzing temporal patterns, content characteristics, user engagement, and activity distributions across all snapshots.
 
-\subsection{Temporal Distribution}
+\subsection*{Temporal Distribution}
 
 The dataset spans from August 22, 2016 to August 2, 2025, covering a period of approximately 9 years. Table~\ref{tab:temporal_distribution} summarizes the temporal distribution across all snapshots.
 
@@ -74,7 +74,7 @@ Figure~\ref{fig:temporal_distribution} visualizes the temporal distribution of p
     \label{fig:temporal_distribution}
 \end{figure}
 
-\subsection{Language Distribution}
+\subsection*{Language Distribution}
 
 The dataset is predominantly English, with 97.01\% of posts (177,085 out of 182,545) written in English. A total of 80 unique languages were detected across all snapshots. Table~\ref{tab:language_distribution} shows the top languages.
 
@@ -111,7 +111,7 @@ Figure~\ref{fig:language_distribution} shows the language distribution as a pie 
     \label{fig:language_distribution}
 \end{figure}
 
-\subsection{Content Characteristics}
+\subsection*{Content Characteristics}
 
 \subsubsection{Text Length Analysis}
 
@@ -164,7 +164,7 @@ Interestingly, the content shows minimal use of URLs, hashtags, and mentions:
 
 This suggests that the content has been preprocessed to remove or normalize such elements, or reflects a specific subset of posts that does not include these features.
 
-\subsection{Engagement Metrics}
+\subsection*{Engagement Metrics}
 
 User engagement is measured through replies, reblogs, and quotes. Table~\ref{tab:engagement_stats} presents the engagement statistics for the aggregated dataset.
 
@@ -195,7 +195,7 @@ Figure~\ref{fig:engagement_distribution} visualizes the engagement distribution,
     \label{fig:engagement_distribution}
 \end{figure}
 
-\subsection{Reactions Analysis}
+\subsection*{Reactions Analysis}
 
 Reactions provide insight into user sentiment. The platform supports multiple reaction types, with reaction type ``1'' (likely a ``like'' equivalent) being dominant, accounting for over 90\% of all reactions. Posts with no reactions represent 23.11\% of the dataset. The average number of reactions per post is 62.22, with a highly skewed distribution (median of 3).
 
@@ -208,7 +208,7 @@ Figure~\ref{fig:reactions} shows the distribution of reaction types across the a
     \label{fig:reactions}
 \end{figure}
 
-\subsection{User Activity Patterns}
+\subsection*{User Activity Patterns}
 
 The dataset contains posts from 27,002 unique users, with an average of 6.76 posts per user. Table~\ref{tab:user_activity} categorizes users by activity level.
 
@@ -239,7 +239,7 @@ Figure~\ref{fig:user_activity} illustrates the user activity distribution, showi
     \label{fig:user_activity}
 \end{figure}
 
-\subsection{Content Analysis: Word Clouds and N-grams}
+\subsection*{Content Analysis: Word Clouds and N-grams}
 
 To better understand the topics discussed on the platform, word frequency analysis was performed. Figure~\ref{fig:wordcloud} presents a word cloud visualization of the most frequent terms in the aggregated dataset.
 
@@ -264,7 +264,7 @@ Figure~\ref{fig:word_bigram} shows the top words and bigrams, providing insight 
 
 Data quality verification examines completeness, consistency, accuracy, and potential issues in the dataset.
 
-\subsection{Completeness Analysis}
+\subsection*{Completeness Analysis}
 
 \subsubsection{Missing Values}
 
@@ -290,7 +290,7 @@ The missing \texttt{language} values likely correspond to posts where automatic 
 
 Importantly, no posts with empty \texttt{content} fields were found, ensuring all records contain textual data for analysis.
 
-\subsection{Consistency Checks}
+\subsection*{Consistency Checks}
 
 \subsubsection{Snapshot vs. Incremental Consistency}
 
@@ -322,7 +322,7 @@ The \texttt{created\_at} and \texttt{timestamp} fields are identical across all 
 
 No duplicate post IDs were found, either within individual snapshots or across the aggregated dataset. Each post maintains a unique identifier throughout the dataset.
 
-\subsection{Duplicate Content Analysis}
+\subsection*{Duplicate Content Analysis}
 
 While post IDs are unique, content-level duplicates exist in the dataset. Table~\ref{tab:duplicates} summarizes the duplicate content findings.
 
@@ -353,7 +353,7 @@ The increasing duplicate rate over time suggests growing repetitive posting beha
 
 Importantly, no completely duplicate rows (excluding ID) were found, meaning each post has unique metadata even when content is identical.
 
-\subsection{Data Type Verification}
+\subsection*{Data Type Verification}
 
 All attributes maintain consistent data types across snapshots:
 \begin{itemize}
@@ -361,11 +361,11 @@ All attributes maintain consistent data types across snapshots:
     \item Text fields (\texttt{content}, \texttt{language}, \texttt{created\_at}, \texttt{timestamp}, \texttt{reactions\_counts}): \texttt{str}
 \end{itemize}
 
-\subsection{Encoding Issues}
+\subsection*{Encoding Issues}
 
 No encoding issues were detected in the text content. The dataset appears to be properly UTF-8 encoded, with no problematic character sequences found during quality checks.
 
-\subsection{Outlier Detection}
+\subsection*{Outlier Detection}
 
 Several extreme values were identified but are considered legitimate data points:
 \begin{itemize}
@@ -377,7 +377,7 @@ Several extreme values were identified but are considered legitimate data points
 
 These outliers represent the heavy-tailed distribution typical of social media engagement, where a small number of viral posts receive disproportionate attention.
 
-\subsection{Summary of Data Quality}
+\subsection*{Summary of Data Quality}
 
 The dataset demonstrates high overall quality:
 \begin{itemize}
