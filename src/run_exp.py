@@ -140,19 +140,6 @@ def build_dataset(args):
         raise NotImplementedError("Dataset not integrated yet")
 
 
-def build_tasker(args, dataset):
-    """Create a tasker object for the specified task.
-
-    Args:
-        args: Configuration namespace.
-        dataset: Dataset object.
-
-    Returns:
-        Tasker object configured for the task.
-    """
-    return lpt.Link_Pred_Tasker(args, dataset)
-
-
 def build_gcn(args, tasker):
     """Build the GCN model based on configuration.
 
@@ -187,10 +174,6 @@ def build_gcn(args, tasker):
             return mls.Sp_GCN_GRU_B(gcn_args, activation=torch.nn.RReLU()).to(args.device)
         elif args.model == "egcn_h":
             return egcn_h.EGCN(gcn_args, activation=torch.nn.RReLU(), device=args.device)
-        elif args.model == "skipfeatsegcn_h":
-            return egcn_h.EGCN(
-                gcn_args, activation=torch.nn.RReLU(), device=args.device, skipfeats=True
-            )
         elif args.model == "egcn_o":
             return egcn_o.EGCN(gcn_args, activation=torch.nn.RReLU(), device=args.device)
         else:
@@ -209,10 +192,7 @@ def build_classifier(args, tasker):
     Returns:
             Classifier module on the specified device.
     """
-    if "node_cls" == args.task or "static_node_cls" == args.task:
-        mult = 1
-    else:
-        mult = 2
+    mult = 2  # link prediction, classifier input [embedding_node_u || embedding_node_v]
     if "gru" in args.model or "lstm" in args.model:
         in_feats = args.gcn_parameters["lstm_l2_feats"] * mult
     elif args.model == "skipfeatsgcn" or args.model == "skipfeatsegcn_h":
@@ -232,6 +212,10 @@ if __name__ == "__main__":
     args = u.parse_args(parser)
 
     args.use_cuda = torch.cuda.is_available() and args.use_cuda
+    if not args.use_cuda:
+        raise ValueError(
+            "GPU is required to run this code. Just to avoid long training times on CPU."
+        )
     args.device = "cuda" if args.use_cuda else "cpu"
     print("use CUDA:", args.use_cuda, "- device:", args.device)
 
@@ -251,7 +235,7 @@ if __name__ == "__main__":
     # build the dataset
     dataset = build_dataset(args)
     # build the tasker
-    tasker = build_tasker(args, dataset)
+    tasker = lpt.Link_Pred_Tasker(args, dataset)
 
     # Check training mode: incremental or standard
     # Handle boolean and string representations

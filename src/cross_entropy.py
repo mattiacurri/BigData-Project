@@ -19,40 +19,8 @@ class Cross_Entropy(torch.nn.Module):
             dataset: Dataset object for dynamic scaling.
         """
         super().__init__()
-        weights = torch.tensor(args.class_weights).to(args.device)
 
-        self.weights = self.dyn_scale(args.task, dataset, weights)
-
-    def dyn_scale(self, task, dataset, weights):
-        """Create a dynamic weight scaling function.
-
-        Args:
-            task: Task name (link_pred, edge_cls, etc.).
-            dataset: Dataset object.
-            weights: Base class weights.
-
-        Returns:
-            Function to scale weights based on labels.
-        """
-        # if task == 'link_pred':  commented to have a 1:1 ratio
-
-        #     '''
-        #     when doing link prediction there is an extra weighting factor on the non-existing
-        #     edges
-        #     '''
-        #     tot_neg = dataset.num_non_existing
-        #     def scale(labels):
-        #         cur_neg = (labels == 0).sum(dtype = torch.float)
-        #         out = weights.clone()
-        #         out[0] *= tot_neg/cur_neg
-        #         return out
-        # else:
-        #     def scale(labels):
-        #         return weights
-        def scale(labels):
-            return weights
-
-        return scale
+        self.weights = torch.tensor(args.class_weights).to(args.device)
 
     def logsumexp(self, logits):
         """Compute log-sum-exp for numerical stability.
@@ -79,6 +47,6 @@ class Cross_Entropy(torch.nn.Module):
             Scalar loss value.
         """
         labels = labels.view(-1, 1)
-        alpha = self.weights(labels)[labels].view(-1, 1)
+        alpha = self.weights[labels].view(-1, 1)
         loss = alpha * (-logits.gather(-1, labels) + self.logsumexp(logits))
         return loss.mean()

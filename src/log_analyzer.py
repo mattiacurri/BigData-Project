@@ -9,23 +9,14 @@ from pylab import *
 
 ##### Parameters ######
 filename = sys.argv[-1]  # log filename
-cl_to_plot_id = 1  # Target class, typically the low frequent one
-if "reddit" in filename or ("bitcoin" in filename and "edge" in filename):
-    cl_to_plot_id = 0  # 0 for reddit dataset or bitcoin edge cls
+cl_to_plot_id = 1  # Target class
 
 simulate_early_stop = 0  # Early stop patience
 eval_k = 1000  # to compute metrics @K (for instance precision@1000)
 print_params = True  # Print the parameters of each simulation
 ##### End parameters ######
 
-if (
-    "elliptic" in filename
-    or "reddit" in filename
-    or ("bitcoin" in filename and "edge" in filename)
-):
-    target_measure = "f1"  # map mrr f1 p r loss avg_p avg_r avg_f1
-else:
-    target_measure = "map"  # map mrr f1 p r loss avg_p avg_r avg_f1
+target_measure = "map"  # map mrr f1 p r loss avg_p avg_r avg_f1
 
 
 # Hyper parameters to analyze
