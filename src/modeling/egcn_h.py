@@ -32,8 +32,7 @@ class EGCN(torch.nn.Module):
         feats = [args.feats_per_node, args.layer_1_feats, args.layer_2_feats]
         self.device = device
         self.skipfeats = skipfeats
-        self.GRCU_layers = []
-        self._parameters = nn.ParameterList()
+        self.GRCU_layers = nn.ModuleList()
         for i in range(1, len(feats)):
             GRCU_args = u.Namespace(
                 {"in_feats": feats[i - 1], "out_feats": feats[i], "activation": activation}
@@ -41,15 +40,6 @@ class EGCN(torch.nn.Module):
 
             grcu_i = GRCU(GRCU_args)
             self.GRCU_layers.append(grcu_i.to(self.device))
-            self._parameters.extend(list(self.GRCU_layers[-1].parameters()))
-
-    def parameters(self):
-        """Get model parameters.
-
-        Returns:
-            List of parameters.
-        """
-        return self._parameters
 
     def forward(self, A_list, Nodes_list, nodes_mask_list):
         """Forward pass through EGCN-H.

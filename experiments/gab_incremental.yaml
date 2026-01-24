@@ -31,8 +31,9 @@ steps_accum_gradients: 1
 learning_rate: 0.005
 learning_rate_min: 0.005
 learning_rate_max: 0.05
-negative_mult_training: 10
-negative_mult_test: 10
+negative_mult_training: 1
+negative_mult_test: 1
+max_negative_test_edges: 1000000  # Limit negative edges in test to 1M for memory efficiency (None = all edges)
 smart_neg_sampling: True
 target_measure: MAP  # Measure to define the best epoch
 target_class: 1  # Target class for metric calculation
@@ -41,6 +42,7 @@ early_stop_patience: 10  # Reduced for fine-tuning phases
 eval_after_epochs: 0  # Start evaluating from first epoch in incremental mode
 adj_mat_time_window: 1
 num_hist_steps: 1
+# hyperparameters tuning ranges (not used for now)
 num_hist_steps_min: 1
 num_hist_steps_max: 2
 
@@ -52,10 +54,10 @@ gcn_parameters:
   feats_per_node: 768  # BERT embedding dimension
   feats_per_node_min: 768
   feats_per_node_max: 768
-  layer_1_feats: 128
-  layer_1_feats_min: 64
-  layer_1_feats_max: 256
-  layer_2_feats: 64
+  layer_1_feats: 64
+  layer_1_feats_min: 32
+  layer_1_feats_max: 128
+  layer_2_feats: 32
   layer_2_feats_same_as_l1: "False"
   k_top_grcu: 50
   num_layers: 2

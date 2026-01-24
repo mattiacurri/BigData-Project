@@ -109,29 +109,80 @@ def make_sparse_eye(size):
     return eye
 
 
-def get_all_non_existing_edges(adj, tot_nodes):
+def get_all_non_existing_edges(adj, tot_nodes, max_edges=None):
     """Get all non-existing edges in the graph.
 
     Args:
         adj: Adjacency dict with existing edges.
         tot_nodes: Total number of nodes.
+        max_edges: Maximum number of negative edges to return. If None, returns all.
+                   Use this to limit memory usage for large graphs.
 
     Returns:
-        Dict with all non-existing edge pairs.
+        Dict with all non-existing edge pairs (or sampled subset if max_edges specified).
     """
     true_ids = adj["idx"].t().numpy()
-    true_ids = get_edges_ids(true_ids, tot_nodes)
+    true_ids_set = set(get_edges_ids(true_ids, tot_nodes))
+    num_positive = len(true_ids_set)
 
+    total_possible = tot_nodes * tot_nodes - num_positive
+
+    # If max_edges is set and less than total, sample instead of enumerating all
+    if max_edges is not None and max_edges < total_possible:
+        # Use efficient sampling instead of generating all edges
+        return _sample_non_existing_edges_efficient(true_ids_set, tot_nodes, max_edges)
+
+    # Original behavior: enumerate all edges (memory intensive!)
     all_edges_idx = np.arange(tot_nodes)
     all_edges_idx = np.array(np.meshgrid(all_edges_idx, all_edges_idx)).reshape(2, -1)
 
     all_edges_ids = get_edges_ids(all_edges_idx, tot_nodes)
 
     # only edges that are not in the true_ids should keep here
-    mask = np.logical_not(np.isin(all_edges_ids, true_ids))
+    mask = np.logical_not(np.isin(all_edges_ids, true_ids_set))
 
     non_existing_edges_idx = all_edges_idx[:, mask]
     edges = torch.tensor(non_existing_edges_idx).t()
+    vals = torch.zeros(edges.size(0), dtype=torch.long)
+    return {"idx": edges, "vals": vals}
+
+
+def _sample_non_existing_edges_efficient(true_ids_set, tot_nodes, num_samples):
+    """Efficiently sample non-existing edges without generating all possibilities.
+
+    Args:
+        true_ids_set: Set of existing edge IDs.
+        tot_nodes: Total number of nodes.
+        num_samples: Number of negative edges to sample.
+
+    Returns:
+        Dict with sampled non-existing edges.
+    """
+    sampled = set()
+    attempts = 0
+    max_attempts = num_samples * 10  # Avoid infinite loop
+
+    while len(sampled) < num_samples and attempts < max_attempts:
+        # Sample batch of random edges
+        batch_size = min(num_samples * 2, 1000000)
+        src = np.random.randint(0, tot_nodes, batch_size)
+        dst = np.random.randint(0, tot_nodes, batch_size)
+
+        for s, d in zip(src, dst):
+            edge_id = s * tot_nodes + d
+            # Skip self-loops and existing edges
+            if s != d and edge_id not in true_ids_set and edge_id not in sampled:
+                sampled.add(edge_id)
+                if len(sampled) >= num_samples:
+                    break
+        attempts += batch_size
+
+    # Convert back to edge indices
+    sampled_ids = np.array(list(sampled))
+    src_nodes = sampled_ids // tot_nodes
+    dst_nodes = sampled_ids % tot_nodes
+
+    edges = torch.tensor(np.stack([src_nodes, dst_nodes], axis=1), dtype=torch.long)
     vals = torch.zeros(edges.size(0), dtype=torch.long)
     return {"idx": edges, "vals": vals}
 

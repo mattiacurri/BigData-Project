@@ -284,13 +284,26 @@ class Trainer:
         """
         sample = u.Namespace(sample)
         for i, adj in enumerate(sample.hist_adj_list):
-            adj = u.sparse_prepare_tensor(adj, torch_size=[self.num_nodes])
+            # Get node features and handle batch dimension from DataLoader
+            node_feats = sample.hist_ndFeats_list[i]
+
+            # DataLoader adds batch dim: [1, num_nodes, features] -> squeeze to [num_nodes, features]
+            if node_feats.dim() == 3 and node_feats.size(0) == 1:
+                node_feats = node_feats.squeeze(0)
+
+            num_nodes_in_sample = node_feats.shape[0]
+
+            adj = u.sparse_prepare_tensor(adj, torch_size=[num_nodes_in_sample])
             sample.hist_adj_list[i] = adj.to(self.args.device)
 
-            nodes = self.tasker.prepare_node_feats(sample.hist_ndFeats_list[i])
+            nodes = self.tasker.prepare_node_feats(node_feats)
 
             sample.hist_ndFeats_list[i] = nodes.to(self.args.device)
+
+            # Handle node mask batch dimension
             node_mask = sample.node_mask_list[i]
+            if node_mask.dim() == 2 and node_mask.size(0) == 1:
+                node_mask = node_mask.squeeze(0)
             sample.node_mask_list[i] = node_mask.to(
                 self.args.device
             ).t()  # transposed to have same dimensions as scorer
@@ -375,46 +388,44 @@ class Trainer:
 
         This approach allows the model to adapt to temporal drift in the data.
         """
-        snapshots = self.splitter.get_all_snapshots()
-        num_snapshots = len(snapshots)
+        # Get train/test pairs - training snapshots use normal negative sampling,
+        # test snapshots use all_edges for comprehensive evaluation
+        train_test_pairs = self.splitter.get_train_test_pairs()
+        num_phases = len(train_test_pairs)
 
-        if num_snapshots < 2:
+        if num_phases < 1:
             raise ValueError("Incremental training requires at least 2 snapshots")
 
         print(f"\n{'=' * 60}")
-        print(f"Starting Incremental Training with {num_snapshots} snapshots")
+        print(f"Starting Incremental Training with {num_phases + 1} snapshots")
         print(f"{'=' * 60}\n")
 
         all_results = []
 
-        for snapshot_idx in range(num_snapshots - 1):
-            train_snapshot = snapshots[snapshot_idx]
-            test_snapshot = snapshots[snapshot_idx + 1]
-
+        for phase_idx, (train_snapshot, test_snapshot) in enumerate(train_test_pairs):
             print(f"\n{'=' * 60}")
-            if snapshot_idx == 0:
-                print(f"Phase {snapshot_idx + 1}: Initial Training")
+            if phase_idx == 0:
+                print(f"Phase {phase_idx + 1}: Initial Training")
             else:
-                print(f"Phase {snapshot_idx + 1}: Fine-tuning")
-            print(f"Train on snapshot {snapshot_idx} -> Test on snapshot {snapshot_idx + 1}")
+                print(f"Phase {phase_idx + 1}: Fine-tuning")
+            print(f"Train on snapshot {phase_idx} -> Test on snapshot {phase_idx + 1}")
             print(f"{'=' * 60}\n")
 
             phase_results = self._run_incremental_phase(
                 train_snapshot=train_snapshot,
                 test_snapshot=test_snapshot,
-                phase_idx=snapshot_idx,
-                is_initial=(snapshot_idx == 0),
+                phase_idx=phase_idx,
+                is_initial=(phase_idx == 0),
             )
 
             all_results.append(phase_results)
 
             # Save checkpoint after each phase
-            checkpoint_path = os.path.join(
-                self.args.log_dir, f"checkpoint_phase_{snapshot_idx}.pth.tar"
-            )
+            log_dir = getattr(self.args, "log_dir", "log/")
+            checkpoint_path = os.path.join(log_dir, f"checkpoint_phase_{phase_idx}.pth.tar")
             self.save_checkpoint(
                 {
-                    "phase": snapshot_idx,
+                    "phase": phase_idx,
                     "gcn_dict": self.gcn.state_dict(),
                     "classifier_dict": self.classifier.state_dict(),
                     "gcn_optimizer": self.gcn_opt.state_dict(),

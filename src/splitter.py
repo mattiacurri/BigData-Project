@@ -169,23 +169,37 @@ class incremental_splitter:
     def _create_snapshots(self) -> List[DataLoader]:
         """Create DataLoader for each snapshot.
 
+        Creates two versions of each snapshot:
+        - Training version (test=False, normal negative sampling)
+        - Testing version (test=True, all_edges for full evaluation)
+
         Returns:
-            List of DataLoaders, one per snapshot.
+            List of DataLoaders, one per snapshot (training version).
         """
-        snapshots = []
+        train_snapshots = []
+        test_snapshots = []
 
         for start, end in self.snapshot_boundaries:
-            if self.args.task == "link_pred":
-                snapshot_data = data_split(self.tasker, start, end, test=True, all_edges=True)
-            else:
-                snapshot_data = data_split(self.tasker, start, end, test=True)
-
-            snapshot_loader = DataLoader(
-                snapshot_data, num_workers=self.args.data_loading_params["num_workers"]
+            # Training version - uses normal negative sampling
+            train_data = data_split(self.tasker, start, end, test=False)
+            train_loader = DataLoader(
+                train_data, batch_size=1, num_workers=self.args.data_loading_params["num_workers"]
             )
-            snapshots.append(snapshot_loader)
+            train_snapshots.append(train_loader)
 
-        return snapshots
+            # Testing version - uses all_edges for full evaluation
+            if self.args.task == "link_pred":
+                test_data = data_split(self.tasker, start, end, test=True, all_edges=True)
+            else:
+                test_data = data_split(self.tasker, start, end, test=True)
+            test_loader = DataLoader(
+                test_data, batch_size=1, num_workers=self.args.data_loading_params["num_workers"]
+            )
+            test_snapshots.append(test_loader)
+
+        # Store both versions
+        self._test_snapshots = test_snapshots
+        return train_snapshots
 
     def get_all_snapshots(self) -> List[DataLoader]:
         """Get all snapshot DataLoaders.
@@ -216,10 +230,13 @@ class incremental_splitter:
 
         Returns:
             List of (train_loader, test_loader) tuples.
+            - train_loader uses normal negative sampling (test=False)
+            - test_loader uses all_edges for comprehensive evaluation
         """
         pairs = []
         for i in range(len(self.snapshots) - 1):
-            pairs.append((self.snapshots[i], self.snapshots[i + 1]))
+            # Train on snapshot i (training version), test on snapshot i+1 (test version)
+            pairs.append((self.snapshots[i], self._test_snapshots[i + 1]))
         return pairs
 
     def __len__(self) -> int:
