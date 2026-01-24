@@ -11,7 +11,6 @@ import torch
 import torch.distributed as dist
 
 # datasets
-import bitcoin_dl as bc
 import cross_entropy as ce
 
 # taskers
@@ -135,13 +134,7 @@ def build_dataset(args):
     Raises:
         NotImplementedError: If the requested dataset is not yet supported.
     """
-    if args.data == "bitcoinotc" or args.data == "bitcoinalpha":
-        if args.data == "bitcoinotc":
-            args.bitcoin_args = args.bitcoinotc_args
-        # elif args.data == 'bitcoinalpha':
-        # args.bitcoin_args = args.bitcoinalpha_args
-        return bc.bitcoin_dataset(args)
-    elif args.data == "gab":
+    if args.data == "gab":
         return ds.GabDataset(args)
     else:
         raise NotImplementedError("Dataset not integrated yet")
