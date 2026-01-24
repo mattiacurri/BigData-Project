@@ -12,125 +12,6 @@ import utils as u
 
 ECOLS = u.Namespace({"source": 0, "target": 1, "time": 2, "label": 3})  # --> added for edge_cls
 
-# def get_2_hot_deg_feats(adj,max_deg_out,max_deg_in,num_nodes):
-#     #For now it'll just return a 2-hot vector
-#     adj['vals'] = torch.ones(adj['idx'].size(0))
-#     degs_out, degs_in = get_degree_vects(adj,num_nodes)
-
-#     degs_out = {'idx': torch.cat([torch.arange(num_nodes).view(-1,1),
-#                                   degs_out.view(-1,1)],dim=1),
-#                 'vals': torch.ones(num_nodes)}
-
-#     # print ('XXX degs_out',degs_out['idx'].size(),degs_out['vals'].size())
-#     degs_out = u.make_sparse_tensor(degs_out,'long',[num_nodes,max_deg_out])
-
-#     degs_in = {'idx': torch.cat([torch.arange(num_nodes).view(-1,1),
-#                                   degs_in.view(-1,1)],dim=1),
-#                 'vals': torch.ones(num_nodes)}
-#     degs_in = u.make_sparse_tensor(degs_in,'long',[num_nodes,max_deg_in])
-
-#     hot_2 = torch.cat([degs_out,degs_in],dim = 1)
-#     hot_2 = {'idx': hot_2._indices().t(),
-#              'vals': hot_2._values()}
-
-#     return hot_2
-
-
-def get_1_hot_deg_feats(adj, max_deg, num_nodes):
-    """Generate 1-hot degree features for nodes.
-
-    Args:
-        adj: Adjacency dict.
-        max_deg: Maximum degree value.
-        num_nodes: Number of nodes.
-
-    Returns:
-        Dict with 1-hot encoded degree features.
-    """
-    # For now it'll just return a 2-hot vector
-    new_vals = torch.ones(adj["idx"].size(0))
-    new_adj = {"idx": adj["idx"], "vals": new_vals}
-    degs_out, _ = get_degree_vects(new_adj, num_nodes)
-
-    degs_out = {
-        "idx": torch.cat([torch.arange(num_nodes).view(-1, 1), degs_out.view(-1, 1)], dim=1),
-        "vals": torch.ones(num_nodes),
-    }
-
-    # print ('XXX degs_out',degs_out['idx'].size(),degs_out['vals'].size())
-    degs_out = u.make_sparse_tensor(degs_out, "long", [num_nodes, max_deg])
-
-    hot_1 = {"idx": degs_out._indices().t(), "vals": degs_out._values()}
-    return hot_1
-
-
-def get_max_degs(args, dataset, all_window=False):
-    """Get maximum in/out-degrees across all time steps.
-
-    Args:
-        args: Configuration namespace.
-        dataset: Dataset object.
-        all_window: Whether to use all history or just window.
-
-    Returns:
-        tuple: (max_out_degree, max_in_degree)
-    """
-    max_deg_out = []
-    max_deg_in = []
-    for t in range(dataset.min_time, dataset.max_time):
-        if all_window:
-            window = t + 1
-        else:
-            window = args.adj_mat_time_window
-
-        cur_adj = get_sp_adj(edges=dataset.edges, time=t, weighted=False, time_window=window)
-        # print(window)
-        cur_out, cur_in = get_degree_vects(cur_adj, dataset.num_nodes)
-        max_deg_out.append(cur_out.max())
-        max_deg_in.append(cur_in.max())
-        # max_deg_out = torch.stack([max_deg_out,cur_out.max()]).max()
-        # max_deg_in = torch.stack([max_deg_in,cur_in.max()]).max()
-    # exit()
-    max_deg_out = torch.stack(max_deg_out).max()
-    max_deg_in = torch.stack(max_deg_in).max()
-    max_deg_out = int(max_deg_out) + 1
-    max_deg_in = int(max_deg_in) + 1
-
-    return max_deg_out, max_deg_in
-
-
-def get_max_degs_static(num_nodes, adj_matrix):
-    """Get maximum degrees for static graph.
-
-    Args:
-        num_nodes: Number of nodes.
-        adj_matrix: Adjacency matrix dict.
-
-    Returns:
-        tuple: (max_out_degree, max_in_degree)
-    """
-    cur_out, cur_in = get_degree_vects(adj_matrix, num_nodes)
-    max_deg_out = int(cur_out.max().item()) + 1
-    max_deg_in = int(cur_in.max().item()) + 1
-
-    return max_deg_out, max_deg_in
-
-
-def get_degree_vects(adj, num_nodes):
-    """Get in-degree and out-degree vectors.
-
-    Args:
-        adj: Adjacency dict.
-        num_nodes: Number of nodes.
-
-    Returns:
-        tuple: (out_degrees, in_degrees)
-    """
-    adj = u.make_sparse_tensor(adj, "long", [num_nodes])
-    degs_out = adj.matmul(torch.ones(num_nodes, 1, dtype=torch.long))
-    degs_in = adj.t().matmul(torch.ones(num_nodes, 1, dtype=torch.long))
-    return degs_out, degs_in
-
 
 def get_sp_adj(edges, time, weighted, time_window):
     """Get sparse adjacency matrix for a specific time window.
@@ -160,24 +41,6 @@ def get_sp_adj(edges, time, weighted, time_window):
     return {"idx": idx, "vals": vals}
 
 
-def get_edge_labels(edges, time):
-    """Get edge labels for a specific time.
-
-    Args:
-        edges: Edge list with labels.
-        time: Target time.
-
-    Returns:
-        Dict with edge indices and labels.
-    """
-    idx = edges["idx"]
-    subset = idx[:, ECOLS.time] == time
-    idx = edges["idx"][subset][:, [ECOLS.source, ECOLS.target]]
-    vals = edges["idx"][subset][:, ECOLS.label]
-
-    return {"idx": idx, "vals": vals}
-
-
 def get_node_mask(cur_adj, num_nodes):
     """Get node mask for masking non-existent nodes.
 
@@ -194,43 +57,6 @@ def get_node_mask(cur_adj, num_nodes):
     mask[non_zero] = 0
 
     return mask
-
-
-def get_static_sp_adj(edges, weighted):
-    """Get sparse adjacency matrix for static graphs.
-
-    Args:
-        edges: Edge list.
-        weighted: Whether to include edge weights.
-
-    Returns:
-        Dict with sparse adjacency matrix.
-    """
-    idx = edges["idx"]
-    # subset = idx[:,ECOLS.time] <= time
-    # subset = subset * (idx[:,ECOLS.time] > (time - time_window))
-
-    # idx = edges['idx'][subset][:,[ECOLS.source, ECOLS.target]]
-    if weighted:
-        vals = edges["vals"][subset]
-    else:
-        vals = torch.ones(idx.size(0), dtype=torch.long)
-
-    return {"idx": idx, "vals": vals}
-
-
-def get_sp_adj_only_new(edges, time, weighted):
-    """Get sparse adjacency matrix for only newly added edges.
-
-    Args:
-        edges: Edge list.
-        time: Target time.
-        weighted: Whether to include edge weights.
-
-    Returns:
-        Dict with sparse adjacency matrix for new edges only.
-    """
-    return get_sp_adj(edges, time, weighted, time_window=1)
 
 
 def normalize_adj(adj, num_nodes):
@@ -323,7 +149,6 @@ def get_non_existing_edges(adj, number, tot_nodes, smart_sampling, existing_node
     Returns:
         Dict with sampled non-existing edges.
     """
-    # print('----------')
     t0 = time.time()
     idx = adj["idx"].t().numpy()
     true_ids = get_edges_ids(idx, tot_nodes)
@@ -336,10 +161,8 @@ def get_non_existing_edges(adj, number, tot_nodes, smart_sampling, existing_node
     if smart_sampling:
         # existing_nodes = existing_nodes.numpy()
         def sample_edges(num_edges):
-            # print('smart_sampling')
             from_id = np.random.choice(idx[0], size=num_edges, replace=True)
             to_id = np.random.choice(existing_nodes, size=num_edges, replace=True)
-            # print ('smart_sampling', from_id, to_id)
 
             if num_edges > 1:
                 edges = np.stack([from_id, to_id])
@@ -393,7 +216,4 @@ def get_edges_ids(sp_idx, tot_nodes):
     Returns:
         Array of linear edge IDs.
     """
-    # print(sp_idx)
-    # print(tot_nodes)
-    # print(sp_idx[0]*tot_nodes)
     return sp_idx[0] * tot_nodes + sp_idx[1]
