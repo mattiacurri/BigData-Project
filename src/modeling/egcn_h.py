@@ -117,6 +117,9 @@ class GRCU(torch.nn.Module):
         Returns:
             List of updated node embeddings across time.
         """
+        # Remove batch dimension if present
+        node_embs_list = [ne.squeeze(0) if ne.dim() == 3 else ne for ne in node_embs_list]
+
         GCN_weights = self.GCN_init_weights
         out_seq = []
         for t, Ahat in enumerate(A_list):
@@ -272,7 +275,38 @@ class TopK(torch.nn.Module):
         ):
             node_embs = node_embs.to_dense()
 
-        out = node_embs[topk_indices] * tanh(scores[topk_indices].view(-1, 1))
+        # Handle both 2D [nodes, features] and 3D [batch, nodes, features] tensors
+        original_shape = node_embs.shape
+        if len(node_embs.shape) == 3:
+            # Has batch dimension - flatten for indexing
+            batch_size = node_embs.size(0)
+            num_nodes = node_embs.size(1)
+            feat_dim = node_embs.size(2)
+            # Reshape to [nodes, features]
+            node_embs_2d = node_embs.view(batch_size * num_nodes, feat_dim)
+        else:
+            # Already 2D
+            num_nodes = node_embs.size(0)
+            node_embs_2d = node_embs
+
+        # Ensure topk_indices are within bounds
+        valid_mask = topk_indices < num_nodes
+        topk_indices = topk_indices[valid_mask]
+
+        # If we have no valid indices, create default indices
+        if topk_indices.size(0) == 0:
+            k_actual = min(self.k, num_nodes)
+            topk_indices = torch.arange(k_actual, dtype=torch.long, device=node_embs.device)
+
+        # If we still need more indices, pad with valid indices
+        if topk_indices.size(0) < self.k and num_nodes > 0:
+            topk_indices = u.pad_with_last_val(topk_indices, min(self.k, num_nodes))
+            # Ensure padded indices are also within bounds
+            topk_indices = topk_indices % num_nodes
+
+        # Index using flattened scores and 2D embeddings
+        scores_flat = scores.view(-1)
+        out = node_embs_2d[topk_indices] * tanh(scores_flat[topk_indices].view(-1, 1))
 
         # we need to transpose the output
         return out.t()

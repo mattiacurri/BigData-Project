@@ -20,16 +20,12 @@ class Link_Pred_Tasker:
     This is a dictionary with:
             - time_step: the time_step of the prediction
             - hist_adj_list: the input adjacency matrices until t, each element of the list
-                                             is a sparse tensor with the current edges. For link_pred they're
-                                             unweighted
+                                             is a sparse tensor with the current edges.
             - nodes_feats_list: the input nodes for the GCN models, each element of the list is a tensor
                                               two dimmensions: node_idx and node_feats
             - label_adj: a sparse representation of the target edges. A dict with two keys: idx: M by 2
                                      matrix with the indices of the nodes conforming each edge, vals: 1 if the node exists
                                      , 0 if it doesn't
-
-    There's a test difference in the behavior, on test (or development), the number of sampled non existing
-    edges should be higher.
     """
 
     def __init__(self, args, dataset):
@@ -45,46 +41,12 @@ class Link_Pred_Tasker:
         self.args = args
         self.num_classes = 2
 
-        if not (args.use_2_hot_node_feats or args.use_1_hot_node_feats):
-            self.feats_per_node = dataset.feats_per_node
+        # Use dataset features (BERT embeddings with temporal support)
+        self.feats_per_node = dataset.feats_per_node
+        print(f"Using temporal node features: {self.feats_per_node} features per node")
 
         self.get_node_feats = self.build_get_node_feats(args, dataset)
         self.prepare_node_feats = self.build_prepare_node_feats(args, dataset)
-        self.is_static = False
-
-        """TO CREATE THE CSV DATASET TO USE IN DynGEM
-		print ('min max time:', self.data.min_time, self.data.max_time)
-		file = open('data/autonomous_syst100_adj.csv','w')
-		file.write ('source,target,weight,time\n')
-		for time in range(self.data.min_time, self.data.max_time):
-			adj_t = tu.get_sp_adj(edges = self.data.edges,
-					   time = time,
-					   weighted = True,
-					   time_window = 1)
-			#node_feats = self.get_node_feats(adj_t)
-			print (time, len(adj_t))
-			idx = adj_t['idx']
-			vals = adj_t['vals']
-			num_nodes = self.data.num_nodes
-			sp_tensor = torch.sparse.FloatTensor(idx.t(),vals.type(torch.float),torch.Size([num_nodes,num_nodes]))
-			dense_tensor = sp_tensor.to_dense()
-			idx = sp_tensor._indices()
-			for i in range(idx.size()[1]):
-				i0=idx[0,i]
-				i1=idx[1,i]
-				w = dense_tensor[i0,i1]
-				file.write(str(i0.item())+','+str(i1.item())+','+str(w.item())+','+str(time)+'\n')
-
-			#for i, v in zip(idx, vals):
-			#	file.write(str(i[0].item())+','+str(i[1].item())+','+str(v.item())+','+str(time)+'\n')
-
-		file.close()
-		exit"""
-
-    # def build_get_non_existing(args):
-    # 	if args.use_smart_neg_sampling:
-    # 	else:
-    # 		return tu.get_non_existing_edges
 
     def build_prepare_node_feats(self, args, dataset):
         """Build the node feature preparation function.
@@ -96,16 +58,7 @@ class Link_Pred_Tasker:
         Returns:
                 Function to prepare node features.
         """
-        if args.use_2_hot_node_feats or args.use_1_hot_node_feats:
-
-            def prepare_node_feats(node_feats):
-                return u.sparse_prepare_tensor(
-                    node_feats, torch_size=[dataset.num_nodes, self.feats_per_node]
-                )
-        else:
-            prepare_node_feats = self.data.prepare_node_feats
-
-        return prepare_node_feats
+        return self.data.prepare_node_feats
 
     def build_get_node_feats(self, args, dataset):
         """Build the node feature extraction function.
@@ -115,24 +68,21 @@ class Link_Pred_Tasker:
                 dataset: Dataset object.
 
         Returns:
-                Function to extract node features from adjacency matrix.
+                Function to extract temporal node features.
         """
-        if args.use_2_hot_node_feats:
-            max_deg_out, max_deg_in = tu.get_max_degs(args, dataset)
-            self.feats_per_node = max_deg_out + max_deg_in
+        print("Using temporal node features from dataset (BERT embeddings per snapshot)")
 
-            def get_node_feats(adj):
-                return tu.get_2_hot_deg_feats(adj, max_deg_out, max_deg_in, dataset.num_nodes)
-        elif args.use_1_hot_node_feats:
-            max_deg, _ = tu.get_max_degs(args, dataset)
-            self.feats_per_node = max_deg
+        def get_node_feats(adj, timestep):
+            """Get temporal node features up to the given timestep.
 
-            def get_node_feats(adj):
-                return tu.get_1_hot_deg_feats(adj, max_deg, dataset.num_nodes)
-        else:
+            Args:
+                adj: Adjacency matrix (unused but kept for API compatibility).
+                timestep: Current timestep to compute features for.
 
-            def get_node_feats(adj):
-                return dataset.nodes_feats
+            Returns:
+                Node features tensor computed from posts up to this timestep.
+            """
+            return dataset.get_temporal_node_features(timestep)
 
         return get_node_feats
 
@@ -166,7 +116,11 @@ class Link_Pred_Tasker:
 
             node_mask = tu.get_node_mask(cur_adj, self.data.num_nodes)
 
-            node_feats = self.get_node_feats(cur_adj)
+            # Get temporal features up to timestep i (features evolve over time)
+            node_feats = self.get_node_feats(cur_adj, timestep=i)
+
+            # Detach features to avoid keeping computation graph across timesteps
+            node_feats = node_feats.detach()
 
             cur_adj = tu.normalize_adj(adj=cur_adj, num_nodes=self.data.num_nodes)
 

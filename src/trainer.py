@@ -3,12 +3,14 @@
 Handles the training, validation, and evaluation loops for temporal graph learning models.
 """
 
+import gc
 import os
 import time
 
 import numpy as np
 import pandas as pd
 import torch
+import tqdm
 
 import logger
 import utils as u
@@ -43,13 +45,6 @@ class Trainer:
         self.logger = logger.Logger(args, self.num_classes)
 
         self.init_optimizers(args)
-
-        if self.tasker.is_static:
-            adj_matrix = u.sparse_prepare_tensor(
-                self.tasker.adj_matrix, torch_size=[self.num_nodes], ignore_batch_dim=False
-            )
-            self.hist_adj_list = [adj_matrix]
-            self.hist_ndFeats_list = [self.tasker.nodes_feats.float()]
 
     def init_optimizers(self, args):
         """Initialize optimizers for GCN and classifier.
@@ -107,8 +102,15 @@ class Trainer:
         epochs_without_impr = 0
 
         for e in range(self.args.num_epochs):
+            # Set models to training mode
+            self.gcn.train()
+            self.classifier.train()
             eval_train, nodes_embs = self.run_epoch(self.splitter.train, e, "TRAIN", grad=True)
+
             if len(self.splitter.dev) > 0 and e > self.args.eval_after_epochs:
+                # Set models to evaluation mode
+                self.gcn.eval()
+                self.classifier.eval()
                 eval_valid, _ = self.run_epoch(self.splitter.dev, e, "VALID", grad=False)
                 if eval_valid > best_eval_valid:
                     best_eval_valid = eval_valid
@@ -125,9 +127,13 @@ class Trainer:
                 and eval_valid == best_eval_valid
                 and e > self.args.eval_after_epochs
             ):
+                # Set models to evaluation mode
+                self.gcn.eval()
+                self.classifier.eval()
                 eval_test, _ = self.run_epoch(self.splitter.test, e, "TEST", grad=False)
 
                 if self.args.save_node_embeddings:
+                    log_file = os.path.join(self.args.log_dir, f"epoch_{e}")
                     self.save_node_embs_csv(
                         nodes_embs, self.splitter.train_idx, log_file + "_train_nodeembs.csv.gz"
                     )
@@ -158,31 +164,43 @@ class Trainer:
             epoch, len(split), set_name, minibatch_log_interval=log_interval
         )
 
-        import tqdm
+        # Use context manager for validation/test to ensure no gradients are computed
+        context_manager = torch.no_grad() if not grad else torch.enable_grad()
 
-        torch.set_grad_enabled(grad)
-        for s in tqdm.tqdm(split, desc=f"Epoch {epoch} - {set_name}"):
-            if self.tasker.is_static:
-                s = self.prepare_static_sample(s)
-            else:
+        with context_manager:
+            nodes_embs = None
+            for s in tqdm.tqdm(split, desc=f"Epoch {epoch} - {set_name}"):
                 s = self.prepare_sample(s)
 
-            predictions, nodes_embs = self.predict(
-                s.hist_adj_list, s.hist_ndFeats_list, s.label_sp["idx"], s.node_mask_list
-            )
-
-            loss = self.comp_loss(predictions, s.label_sp["vals"])
-            print(f"Loss: {loss}")
-            if set_name in ["TEST", "VALID"] and self.args.task == "link_pred":
-                self.logger.log_minibatch(
-                    predictions, s.label_sp["vals"], loss.detach(), adj=s.label_sp["idx"]
+                predictions, nodes_embs = self.predict(
+                    s.hist_adj_list, s.hist_ndFeats_list, s.label_sp["idx"], s.node_mask_list
                 )
-            else:
-                self.logger.log_minibatch(predictions, s.label_sp["vals"], loss.detach())
-            if grad:
-                self.optim_step(loss)
 
-        torch.set_grad_enabled(True)
+                loss = self.comp_loss(predictions, s.label_sp["vals"])
+                print(f"Loss: {loss.item():.4f}")
+                if set_name in ["TEST", "VALID"] and self.args.task == "link_pred":
+                    self.logger.log_minibatch(
+                        predictions, s.label_sp["vals"], loss.detach(), adj=s.label_sp["idx"]
+                    )
+                else:
+                    self.logger.log_minibatch(predictions, s.label_sp["vals"], loss.detach())
+
+                if grad:
+                    self.optim_step(loss)
+
+                # Free memory for validation/test after each batch
+                if not grad:
+                    del predictions
+                    if nodes_embs is not None and not self.args.save_node_embeddings:
+                        nodes_embs = None
+                    torch.cuda.empty_cache() if self.args.use_cuda else None
+
+            # Explicit garbage collection after epoch
+            if not grad:
+                gc.collect()
+                if self.args.use_cuda:
+                    torch.cuda.empty_cache()
+
         eval_measure = self.logger.log_epoch_done()
 
         return eval_measure, nodes_embs
@@ -208,8 +226,19 @@ class Trainer:
                 nodes_embs, node_indices[:, i * predict_batch_size : (i + 1) * predict_batch_size]
             )
             predictions = self.classifier(cls_input)
+            # Detach predictions during inference to avoid keeping computation graph
+            if not self.gcn.training:
+                predictions = predictions.detach()
             gather_predictions.append(predictions)
+            # Free cls_input memory immediately
+            del cls_input
+
         gather_predictions = torch.cat(gather_predictions, dim=0)
+
+        # If not training and embeddings not needed, detach them
+        if not self.gcn.training and not self.args.save_node_embeddings:
+            nodes_embs = nodes_embs.detach()
+
         return gather_predictions, nodes_embs
 
     def gather_node_embs(self, nodes_embs, node_indices):
@@ -335,3 +364,178 @@ class Trainer:
         pd.DataFrame(np.array(csv_node_embs)).to_csv(
             file_name, header=None, index=None, compression="gzip"
         )
+
+    def train_incremental(self):
+        """Execute incremental training workflow.
+
+        Workflow:
+        1. Train on snapshot i, test on snapshot i+1
+        2. Fine-tune on snapshot i+1, test on snapshot i+2
+        3. Continue until all snapshots are used
+
+        This approach allows the model to adapt to temporal drift in the data.
+        """
+        snapshots = self.splitter.get_all_snapshots()
+        num_snapshots = len(snapshots)
+
+        if num_snapshots < 2:
+            raise ValueError("Incremental training requires at least 2 snapshots")
+
+        print(f"\n{'=' * 60}")
+        print(f"Starting Incremental Training with {num_snapshots} snapshots")
+        print(f"{'=' * 60}\n")
+
+        all_results = []
+
+        for snapshot_idx in range(num_snapshots - 1):
+            train_snapshot = snapshots[snapshot_idx]
+            test_snapshot = snapshots[snapshot_idx + 1]
+
+            print(f"\n{'=' * 60}")
+            if snapshot_idx == 0:
+                print(f"Phase {snapshot_idx + 1}: Initial Training")
+            else:
+                print(f"Phase {snapshot_idx + 1}: Fine-tuning")
+            print(f"Train on snapshot {snapshot_idx} -> Test on snapshot {snapshot_idx + 1}")
+            print(f"{'=' * 60}\n")
+
+            phase_results = self._run_incremental_phase(
+                train_snapshot=train_snapshot,
+                test_snapshot=test_snapshot,
+                phase_idx=snapshot_idx,
+                is_initial=(snapshot_idx == 0),
+            )
+
+            all_results.append(phase_results)
+
+            # Save checkpoint after each phase
+            checkpoint_path = os.path.join(
+                self.args.log_dir, f"checkpoint_phase_{snapshot_idx}.pth.tar"
+            )
+            self.save_checkpoint(
+                {
+                    "phase": snapshot_idx,
+                    "gcn_dict": self.gcn.state_dict(),
+                    "classifier_dict": self.classifier.state_dict(),
+                    "gcn_optimizer": self.gcn_opt.state_dict(),
+                    "classifier_optimizer": self.classifier_opt.state_dict(),
+                    "results": phase_results,
+                },
+                filename=checkpoint_path,
+            )
+            print(f"Checkpoint saved: {checkpoint_path}")
+            # Free memory: clear temporal features cache after each phase
+            if hasattr(self.data, "clear_temporal_cache"):
+                self.data.clear_temporal_cache()
+                gc.collect()
+                if self.args.use_cuda:
+                    torch.cuda.empty_cache()
+        # Print summary of all phases
+        self._print_incremental_summary(all_results)
+
+        return all_results
+
+    def _run_incremental_phase(
+        self,
+        train_snapshot: torch.utils.data.DataLoader,
+        test_snapshot: torch.utils.data.DataLoader,
+        phase_idx: int,
+        is_initial: bool,
+    ) -> dict:
+        """Run a single phase of incremental training.
+
+        Args:
+            train_snapshot: DataLoader for training data.
+            test_snapshot: DataLoader for test data.
+            phase_idx: Index of the current phase.
+            is_initial: Whether this is the initial training phase.
+
+        Returns:
+            dict: Results containing train/test metrics and epoch info.
+        """
+        self.tr_step = 0
+        best_eval_train = 0
+        best_eval_test = 0
+        best_epoch = 0
+        epochs_without_impr = 0
+
+        # Use fewer epochs for fine-tuning phases
+        num_epochs = self.args.num_epochs if is_initial else self.args.finetune_epochs
+
+        phase_results = {
+            "phase_idx": phase_idx,
+            "is_initial": is_initial,
+            "num_epochs": num_epochs,
+            "train_metrics": [],
+            "test_metrics": [],
+            "best_test_metric": 0,
+            "best_epoch": 0,
+        }
+
+        for e in range(num_epochs):
+            # Training
+            self.gcn.train()
+            self.classifier.train()
+            eval_train, nodes_embs = self.run_epoch(
+                train_snapshot, e, f"TRAIN (Phase {phase_idx})", grad=True
+            )
+            phase_results["train_metrics"].append(eval_train)
+
+            # Testing
+            self.gcn.eval()
+            self.classifier.eval()
+            eval_test, _ = self.run_epoch(
+                test_snapshot, e, f"TEST (Phase {phase_idx})", grad=False
+            )
+            phase_results["test_metrics"].append(eval_test)
+
+            print(f"Phase {phase_idx} - Epoch {e}: Train={eval_train:.4f}, Test={eval_test:.4f}")
+
+            # Track best performance
+            if eval_test > best_eval_test:
+                best_eval_test = eval_test
+                best_epoch = e
+                epochs_without_impr = 0
+                print(f"  -> New best test metric: {best_eval_test:.4f}")
+            else:
+                epochs_without_impr += 1
+
+            # Early stopping
+            if epochs_without_impr > self.args.early_stop_patience:
+                print(f"  -> Early stopping at epoch {e}")
+                break
+
+        phase_results["best_test_metric"] = best_eval_test
+        phase_results["best_epoch"] = best_epoch
+
+        print(f"\nPhase {phase_idx} completed:")
+        print(f"  Best test metric: {best_eval_test:.4f} at epoch {best_epoch}")
+
+        return phase_results
+
+    def _print_incremental_summary(self, all_results: list) -> None:
+        """Print a summary of all incremental training phases.
+
+        Args:
+            all_results: List of results from each phase.
+        """
+        print(f"\n{'=' * 60}")
+        print("INCREMENTAL TRAINING SUMMARY")
+        print(f"{'=' * 60}")
+
+        for result in all_results:
+            phase_type = "Initial Training" if result["is_initial"] else "Fine-tuning"
+            print(f"\nPhase {result['phase_idx']} ({phase_type}):")
+            print(f"  Best Test Metric: {result['best_test_metric']:.4f}")
+            print(f"  Best Epoch: {result['best_epoch']}")
+            print(f"  Total Epochs: {len(result['train_metrics'])}")
+
+        # Calculate average performance across all test phases
+        test_metrics = [r["best_test_metric"] for r in all_results]
+        print(f"\n{'=' * 60}")
+        print(f"Overall Statistics:")
+        print(f"  Average Test Metric: {np.mean(test_metrics):.4f}")
+        print(f"  Std Test Metric: {np.std(test_metrics):.4f}")
+        print(f"  Min Test Metric: {np.min(test_metrics):.4f}")
+        print(f"  Max Test Metric: {np.max(test_metrics):.4f}")
+        print(f"{'=' * 60}\n")

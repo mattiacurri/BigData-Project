@@ -1,0 +1,77 @@
+data: gab  # Gab dataset for incremental training
+
+gab_args:
+  folder: ./data/
+  edges_file: notused.edg  # Not used anymore but kept for compatibility
+  aggr_time: 1  # Keep original snapshots (0-5)
+
+use_cuda: True
+use_logfile: True
+
+model: egcn_h
+
+task: link_pred
+
+class_weights: [ 0.05, 0.95]
+save_node_embeddings: False
+
+# These are ignored in incremental mode, but kept for compatibility
+train_proportion: 0.6
+dev_proportion: 0.2
+
+# Incremental training settings
+# Workflow: Train on snapshot i, test on snapshot i+1, 
+#           then fine-tune on snapshot i+1, test on i+2, etc.
+incremental: True  # Enable incremental training mode
+num_snapshots: None  # Number of snapshots (None = use all available timesteps)
+finetune_epochs: 5  # Number of epochs for fine-tuning phases (after initial training)
+
+num_epochs: 5  # Number of epochs for initial training
+steps_accum_gradients: 1
+learning_rate: 0.005
+learning_rate_min: 0.005
+learning_rate_max: 0.05
+negative_mult_training: 10
+negative_mult_test: 10
+smart_neg_sampling: True
+target_measure: MAP  # Measure to define the best epoch
+target_class: 1  # Target class for metric calculation
+early_stop_patience: 10  # Reduced for fine-tuning phases
+
+eval_after_epochs: 0  # Start evaluating from first epoch in incremental mode
+adj_mat_time_window: 1
+num_hist_steps: 1
+num_hist_steps_min: 1
+num_hist_steps_max: 2
+
+data_loading_params:
+  batch_size: 1
+  num_workers: 0
+
+gcn_parameters:
+  feats_per_node: 768  # BERT embedding dimension
+  feats_per_node_min: 768
+  feats_per_node_max: 768
+  layer_1_feats: 128
+  layer_1_feats_min: 64
+  layer_1_feats_max: 256
+  layer_2_feats: 64
+  layer_2_feats_same_as_l1: "False"
+  k_top_grcu: 50
+  num_layers: 2
+  lstm_l1_layers: 1
+  lstm_l1_feats: 107
+  lstm_l1_feats_min: 20
+  lstm_l1_feats_max: 200
+  lstm_l2_layers: 1
+  lstm_l2_feats: None
+  lstm_l2_feats_same_as_l1: True
+  cls_feats: 400
+  cls_feats_min: 51
+  cls_feats_max: 500
+
+comments:
+  - Incremental training configuration for Gab dataset
+  - Train on snapshot i -> test on snapshot i+1
+  - Fine-tune on snapshot i+1 -> test on snapshot i+2
+  - Continues until all snapshots are processed

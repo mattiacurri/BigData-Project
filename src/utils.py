@@ -218,43 +218,6 @@ def load_data(file):
     return data
 
 
-def load_data_from_tar(
-    file,
-    tar_archive,
-    replace_unknow=False,
-    starting_line=1,
-    sep=",",
-    type_fn=float,
-    tensor_const=torch.DoubleTensor,
-):
-    """Load data from a file within a tar archive.
-
-    Args:
-        file: File path within tar archive.
-        tar_archive: Tar archive object.
-        replace_unknow: Whether to replace 'unknow' strings with -1.
-        starting_line: Line to start reading from.
-        sep: Field separator.
-        type_fn: Type conversion function.
-        tensor_const: Tensor constructor.
-
-    Returns:
-        Tensor of data.
-    """
-    f = tar_archive.extractfile(file)
-    lines = f.read()  #
-    lines = lines.decode("utf-8")
-    if replace_unknow:
-        lines = lines.replace("unknow", "-1")
-        lines = lines.replace("-1n", "-1")
-
-    lines = lines.splitlines()
-
-    data = [[type_fn(r) for r in row.split(sep)] for row in lines[starting_line:]]
-    data = tensor_const(data)
-    return data
-
-
 def create_parser():
     """Create argument parser for experiment configuration.
 

@@ -3,6 +3,8 @@
 Creates temporal and static data splits for training GCN models.
 """
 
+from typing import List
+
 import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
@@ -20,85 +22,213 @@ class splitter:
             args: Configuration namespace with split ratios and parameters.
             tasker: Tasker object with dataset information.
         """
-        if tasker.is_static:  #### For static datsets
-            assert args.train_proportion + args.dev_proportion < 1, (
-                "there's no space for test samples"
+        assert args.train_proportion + args.dev_proportion < 1, "there's no space for test samples"
+        # only the training one requires special handling on start, the others are fine with the split IDX.
+        # Convert min_time and max_time to int if they're tensors
+        min_time_val = (
+            int(tasker.data.min_time.item())
+            if torch.is_tensor(tasker.data.min_time)
+            else int(tasker.data.min_time)
+        )
+        max_time_val = (
+            int(tasker.data.max_time.item())
+            if torch.is_tensor(tasker.data.max_time)
+            else int(tasker.data.max_time)
+        )
+
+        start = min_time_val + args.num_hist_steps  # -1 + args.adj_mat_time_window
+        print(start, end)
+        end = args.train_proportion
+
+        end = int(np.floor(max_time_val * end))
+        train = data_split(tasker, start, end, test=False)
+        train = DataLoader(train, **args.data_loading_params)
+
+        start = end
+        end = args.dev_proportion + args.train_proportion
+        end = int(np.floor(max_time_val * end))
+        if args.task == "link_pred":
+            dev = data_split(tasker, start, end, test=True, all_edges=True)
+        else:
+            dev = data_split(tasker, start, end, test=True)
+
+        dev = DataLoader(dev, num_workers=args.data_loading_params["num_workers"])
+
+        start = end
+
+        # the +1 is because I assume that max_time exists in the dataset
+        end = max_time_val + 1
+        if args.task == "link_pred":
+            test = data_split(tasker, start, end, test=True, all_edges=True)
+        else:
+            test = data_split(tasker, start, end, test=True)
+
+        test = DataLoader(test, num_workers=args.data_loading_params["num_workers"])
+
+        print("Dataset splits sizes:  train", len(train), "dev", len(dev), "test", len(test))
+
+        self.tasker = tasker
+        self.train = train
+        self.dev = dev
+        self.test = test
+
+
+class incremental_splitter:
+    """Creates snapshot-based splits for incremental training.
+
+    This splitter divides temporal data into discrete snapshots,
+    enabling incremental learning where:
+    - Train on snapshot i, test on snapshot i+1
+    - Fine-tune on snapshot i+1, test on snapshot i+2
+    - And so on...
+    """
+
+    def __init__(self, args, tasker):
+        """Initialize incremental splitter.
+
+        Args:
+            args: Configuration namespace with:
+                - num_hist_steps: Number of historical steps for GCN input.
+                - adj_mat_time_window: Time window for adjacency matrix.
+                - data_loading_params: DataLoader parameters.
+                - task: Task type (e.g., 'link_pred').
+                - num_snapshots: Number of snapshots to create (optional).
+            tasker: Tasker object with dataset information.
+        """
+        self.args = args
+        self.tasker = tasker
+
+        # Convert min_time and max_time to int if they're tensors
+        min_time_val = (
+            int(tasker.data.min_time.item())
+            if torch.is_tensor(tasker.data.min_time)
+            else int(tasker.data.min_time)
+        )
+        max_time_val = (
+            int(tasker.data.max_time.item())
+            if torch.is_tensor(tasker.data.max_time)
+            else int(tasker.data.max_time)
+        )
+
+        self.min_time = min_time_val
+        self.max_time = max_time_val
+        self.num_hist_steps = args.num_hist_steps
+
+        # Calculate valid time range (accounting for history)
+        self.valid_start = min_time_val + args.num_hist_steps
+        self.valid_end = max_time_val + 1
+        print(self.valid_start, self.valid_end)
+
+        # Determine number of snapshots
+        # Handle None, 'None', and numeric values
+        if hasattr(args, "num_snapshots") and args.num_snapshots is not None:
+            if isinstance(args.num_snapshots, str) and args.num_snapshots.lower() == "none":
+                # Default: each time step is a snapshot
+                self.num_snapshots = self.valid_end - self.valid_start
+            else:
+                self.num_snapshots = int(args.num_snapshots)
+        else:
+            # Default: each time step is a snapshot
+            self.num_snapshots = self.valid_end - self.valid_start
+
+        # Create snapshot boundaries
+        self.snapshot_boundaries = self._compute_snapshot_boundaries()
+        self.snapshots = self._create_snapshots()
+
+        print(f"\nIncremental Splitter initialized:")
+        print(f"  Time range: [{self.valid_start}, {self.valid_end})")
+        print(f"  Number of snapshots: {len(self.snapshots)}")
+        for i, (start, end) in enumerate(self.snapshot_boundaries):
+            print(f"    Snapshot {i}: time [{start}, {end}), size={end - start}")
+
+    def _compute_snapshot_boundaries(self) -> List[tuple]:
+        """Compute the time boundaries for each snapshot.
+
+        Returns:
+            List of (start, end) tuples for each snapshot.
+        """
+        total_time_steps = self.valid_end - self.valid_start
+        boundaries = []
+
+        if self.num_snapshots >= total_time_steps:
+            # Each time step is its own snapshot
+            for t in range(self.valid_start, self.valid_end):
+                boundaries.append((t, t + 1))
+        else:
+            # Divide time range into num_snapshots equal parts
+            steps_per_snapshot = total_time_steps / self.num_snapshots
+            for i in range(self.num_snapshots):
+                start = self.valid_start + int(i * steps_per_snapshot)
+                end = self.valid_start + int((i + 1) * steps_per_snapshot)
+                if i == self.num_snapshots - 1:
+                    end = self.valid_end  # Ensure last snapshot includes all remaining
+                boundaries.append((start, end))
+
+        return boundaries
+
+    def _create_snapshots(self) -> List[DataLoader]:
+        """Create DataLoader for each snapshot.
+
+        Returns:
+            List of DataLoaders, one per snapshot.
+        """
+        snapshots = []
+
+        for start, end in self.snapshot_boundaries:
+            if self.args.task == "link_pred":
+                snapshot_data = data_split(self.tasker, start, end, test=True, all_edges=True)
+            else:
+                snapshot_data = data_split(self.tasker, start, end, test=True)
+
+            snapshot_loader = DataLoader(
+                snapshot_data, num_workers=self.args.data_loading_params["num_workers"]
             )
-            # only the training one requires special handling on start, the others are fine with the split IDX.
+            snapshots.append(snapshot_loader)
 
-            random_perm = False
-            indexes = tasker.data.nodes_with_label
+        return snapshots
 
-            if random_perm:
-                perm_idx = torch.randperm(indexes.size(0))
-                perm_idx = indexes[perm_idx]
-            else:
-                print("tasker.data.nodes", indexes.size())
-                perm_idx, _ = indexes.sort()
+    def get_all_snapshots(self) -> List[DataLoader]:
+        """Get all snapshot DataLoaders.
 
-            self.train_idx = perm_idx[: int(args.train_proportion * perm_idx.size(0))]
-            self.dev_idx = perm_idx[
-                int(args.train_proportion * perm_idx.size(0)) : int(
-                    (args.train_proportion + args.dev_proportion) * perm_idx.size(0)
-                )
-            ]
-            self.test_idx = perm_idx[
-                int((args.train_proportion + args.dev_proportion) * perm_idx.size(0)) :
-            ]
+        Returns:
+            List of DataLoaders for all snapshots.
+        """
+        return self.snapshots
 
-            train = static_data_split(tasker, self.train_idx, test=False)
-            train = DataLoader(train, shuffle=True, **args.data_loading_params)
+    def get_snapshot(self, idx: int) -> DataLoader:
+        """Get a specific snapshot by index.
 
-            dev = static_data_split(tasker, self.dev_idx, test=True)
-            dev = DataLoader(dev, shuffle=False, **args.data_loading_params)
+        Args:
+            idx: Snapshot index.
 
-            test = static_data_split(tasker, self.test_idx, test=True)
-            test = DataLoader(test, shuffle=False, **args.data_loading_params)
+        Returns:
+            DataLoader for the requested snapshot.
 
-            self.tasker = tasker
-            self.train = train
-            self.dev = dev
-            self.test = test
+        Raises:
+            IndexError: If idx is out of range.
+        """
+        if idx < 0 or idx >= len(self.snapshots):
+            raise IndexError(f"Snapshot index {idx} out of range [0, {len(self.snapshots)})")
+        return self.snapshots[idx]
 
-        else:  #### For datsets with time
-            assert args.train_proportion + args.dev_proportion < 1, (
-                "there's no space for test samples"
-            )
-            # only the training one requires special handling on start, the others are fine with the split IDX.
-            start = tasker.data.min_time + args.num_hist_steps  # -1 + args.adj_mat_time_window
-            end = args.train_proportion
+    def get_train_test_pairs(self) -> List[tuple]:
+        """Get pairs of (train_snapshot, test_snapshot) for incremental training.
 
-            end = int(np.floor(tasker.data.max_time.type(torch.float) * end))
-            train = data_split(tasker, start, end, test=False)
-            train = DataLoader(train, **args.data_loading_params)
+        Returns:
+            List of (train_loader, test_loader) tuples.
+        """
+        pairs = []
+        for i in range(len(self.snapshots) - 1):
+            pairs.append((self.snapshots[i], self.snapshots[i + 1]))
+        return pairs
 
-            start = end
-            end = args.dev_proportion + args.train_proportion
-            end = int(np.floor(tasker.data.max_time.type(torch.float) * end))
-            if args.task == "link_pred":
-                dev = data_split(tasker, start, end, test=True, all_edges=True)
-            else:
-                dev = data_split(tasker, start, end, test=True)
+    def __len__(self) -> int:
+        """Get the number of snapshots.
 
-            dev = DataLoader(dev, num_workers=args.data_loading_params["num_workers"])
-
-            start = end
-
-            # the +1 is because I assume that max_time exists in the dataset
-            end = int(tasker.max_time) + 1
-            if args.task == "link_pred":
-                test = data_split(tasker, start, end, test=True, all_edges=True)
-            else:
-                test = data_split(tasker, start, end, test=True)
-
-            test = DataLoader(test, num_workers=args.data_loading_params["num_workers"])
-
-            print("Dataset splits sizes:  train", len(train), "dev", len(dev), "test", len(test))
-
-            self.tasker = tasker
-            self.train = train
-            self.dev = dev
-            self.test = test
+        Returns:
+            Number of snapshots.
+        """
+        return len(self.snapshots)
 
 
 class data_split(Dataset):
