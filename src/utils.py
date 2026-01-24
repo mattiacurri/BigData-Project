@@ -13,22 +13,6 @@ import torch
 import yaml
 
 
-def pad_with_last_col(matrix, cols):
-    """Pad matrix columns with the last column repeated.
-
-    Args:
-        matrix: Input matrix to pad.
-        cols: Target number of columns.
-
-    Returns:
-        Padded matrix with shape (rows, cols).
-    """
-    out = [matrix]
-    pad = [matrix[:, [-1]]] * (cols - matrix.size(1))
-    out.extend(pad)
-    return torch.cat(out, dim=1)
-
-
 def pad_with_last_val(vect, k):
     """Pad vector to length k with the last value repeated.
 
@@ -91,35 +75,6 @@ def aggregate_by_time(time_vector, time_win_aggr):
     return time_vector
 
 
-def sort_by_time(data, time_col):
-    """Sort data by time column.
-
-    Args:
-        data: Input data tensor.
-        time_col: Index of time column.
-
-    Returns:
-        Data sorted by time column.
-    """
-    _, sort = torch.sort(data[:, time_col])
-    data = data[sort]
-    return data
-
-
-def print_sp_tensor(sp_tensor, size):
-    """Print a sparse tensor in dense format.
-
-    Args:
-        sp_tensor: Sparse tensor dict.
-        size: Dimension size of the sparse tensor.
-    """
-    print(
-        torch.sparse.FloatTensor(
-            sp_tensor["idx"].t(), sp_tensor["vals"], torch.Size([size, size])
-        ).to_dense()
-    )
-
-
 def reset_param(t):
     """Reset parameter values uniformly.
 
@@ -153,18 +108,6 @@ def make_sparse_tensor(adj, tensor_type, torch_size):
         return torch.sparse.LongTensor(adj["idx"].t(), adj["vals"].type(torch.long), tensor_size)
     else:
         raise NotImplementedError("only make floats or long sparse tensors")
-
-
-def sp_to_dict(sp_tensor):
-    """Convert sparse tensor to dictionary format.
-
-    Args:
-        sp_tensor: PyTorch sparse tensor.
-
-    Returns:
-        Dict with 'idx' and 'vals' keys.
-    """
-    return {"idx": sp_tensor._indices().t(), "vals": sp_tensor._values()}
 
 
 class Namespace(object):
@@ -201,21 +144,6 @@ def random_param_value(param, param_min, param_max, type="int"):
             return random.uniform(param_min, param_max)
     else:
         return param
-
-
-def load_data(file):
-    """Load data from CSV file.
-
-    Args:
-        file: Path to CSV file.
-
-    Returns:
-        Tensor of data.
-    """
-    with open(file) as file:
-        file = file.read().splitlines()
-    data = torch.tensor([[float(r) for r in row.split(",")] for row in file[1:]])
-    return data
 
 
 def create_parser():
