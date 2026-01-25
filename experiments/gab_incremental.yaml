@@ -2,7 +2,6 @@ data: gab  # Gab dataset for incremental training
 
 gab_args:
   folder: ./data/
-  # aggr_time: 1  # Rimosso - non si aggrega più temporalmente
 
 use_cuda: True
 use_logfile: True
@@ -14,17 +13,7 @@ task: link_pred
 class_weights: [0.5, 0.5]
 save_node_embeddings: False # TODO: set to True when we have stable training
 
-# These are ignored in incremental mode, but kept for compatibility
-# train_proportion: 0.6
-# dev_proportion: 0.2
-
-# Incremental training settings
-# Workflow: Train on snapshot i, test on snapshot i+1, 
-#           then fine-tune on snapshot i+1, test on i+2, etc.
-# incremental: True  # Enable incremental training mode
-#num_snapshots: None  # Number of snapshots (None = use all available timesteps)
 finetune_epochs: 2  # Number of epochs for fine-tuning phases (after initial training)
-
 num_epochs: 3  # Number of epochs for initial training
 steps_accum_gradients: 1
 learning_rate: 0.005

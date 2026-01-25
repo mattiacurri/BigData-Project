@@ -105,8 +105,6 @@ def make_sparse_tensor(adj, tensor_type, torch_size):
         return torch.sparse_coo_tensor(adj["idx"].t(), adj["vals"].type(torch.float), tensor_size)
     elif tensor_type == "long":
         return torch.sparse_coo_tensor(adj["idx"].t(), adj["vals"].type(torch.long), tensor_size)
-    else:
-        raise NotImplementedError("only make floats or long sparse tensors")
 
 
 class Namespace(object):

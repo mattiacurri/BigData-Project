@@ -191,10 +191,6 @@ if __name__ == "__main__":
     args = u.parse_args(parser)
 
     args.use_cuda = torch.cuda.is_available() and args.use_cuda
-    if not args.use_cuda:
-        raise ValueError(
-            "GPU is required to run this code. Just to avoid long training times on CPU."
-        )
     args.device = "cuda" if args.use_cuda else "cpu"
     print("use CUDA:", args.use_cuda, "- device:", args.device)
 
@@ -216,11 +212,6 @@ if __name__ == "__main__":
     # build the tasker
     tasker = lpt.Link_Pred_Tasker(args, dataset)
 
-    # if args.incremental:
-    # print("\n" + "=" * 60)
-    # print("INCREMENTAL TRAINING MODE")
-    # print("=" * 60 + "\n")
-
     # Set default finetune_epochs if not specified
     if not hasattr(args, "finetune_epochs") or args.finetune_epochs is None:
         args.finetune_epochs = max(args.num_epochs // 2, 5)
@@ -230,9 +221,6 @@ if __name__ == "__main__":
 
     # build the incremental splitter
     splitter = sp.incremental_splitter(args, tasker)
-    # else:
-    #     # build the standard splitter
-    #     splitter = sp.splitter(args, tasker)
 
     # build the models
     gcn = build_gcn(args, tasker)
@@ -250,7 +238,4 @@ if __name__ == "__main__":
         dataset=dataset,
     )
 
-    # if args.incremental:
     trainer.train_incremental()
-    # else:
-    # trainer.train()

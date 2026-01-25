@@ -190,12 +190,7 @@ class GabDataset:
         period = self.time_periods[snapshot_idx]
         period_folder = self.raw_folder / period
 
-        if not period_folder.exists():
-            raise FileNotFoundError(f"Folder {period_folder} does not exist")
-
         edges_file = period_folder / "social_network.edg"
-        if not edges_file.exists():
-            raise FileNotFoundError(f"File {edges_file} does not exist")
 
         print(f"Loading edges from snapshot {snapshot_idx} ({period})...")
         edges = self._load_edg_file(edges_file)
@@ -326,6 +321,8 @@ class GabDataset:
                 "Weight": 1,
             }
         )
+
+        print(f"Reloaded {len(snapshot_df)} edges from snapshot {snapshot_idx}")
         return snapshot_df
 
     def _compute_nodes_per_snapshot(self, edges: torch.Tensor) -> None:
@@ -483,7 +480,7 @@ class GabDataset:
             node_features[node_idx] = avg_embedding
             users_with_features += 1
 
-        num_nodes_at_snapshot = len(nodes_at_snapshot)
+        # num_nodes_at_snapshot = len(nodes_at_snapshot)
 
         return node_features
 
@@ -513,23 +510,6 @@ class GabDataset:
         all_ids = edges[:, [self.ecols.FromNodeId, self.ecols.ToNodeId]]
         num_nodes = all_ids.max() + 1
         return num_nodes
-
-    def load_and_save_edges(self, _args):
-        """DEPRECATED: Use incremental loading instead.
-
-        This method is kept for backward compatibility but is no longer used.
-        The dataset now loads edges incrementally using _load_snapshot_edges()
-        and add_snapshot_edges().
-
-        Args:
-            _args: Configuration with folder path.
-
-        Returns:
-            DataFrame with columns ['X', 'Y', 'Snapshot', 'Label'].
-        """
-        raise NotImplementedError(
-            "load_and_save_edges is deprecated. Use _load_snapshot_edges() and add_snapshot_edges() instead."
-        )
 
     def _load_edg_file(self, file_path):
         """Load edges from .edg file (tab-separated source-target pairs).

@@ -189,10 +189,6 @@ class Link_Pred_Tasker:
 
         # Remap label_adj to compacted space
         label_adj = self._remap_adj_to_active_nodes(label_adj, node_mapping, num_active_nodes)
-        print(f"[LOG] NUM ACTIVE NODES: {num_active_nodes}")
-        print(
-            f"[LOG] Label adj before negative sampling: idx {label_adj['idx'].shape}, vals {label_adj['vals'].shape}"
-        )
         if test:
             neg_mult = self.args.negative_mult_test
         else:
@@ -206,9 +202,6 @@ class Link_Pred_Tasker:
         if "all_edges" in kwargs.keys() and kwargs["all_edges"] == True:
             non_existing_adj = tu.get_all_non_existing_edges(
                 adj=label_adj, tot_nodes=num_active_nodes
-            )
-            print(
-                f"[LOG] Test mode with all_edges=True: {label_adj['vals'].size(0)} positives + {non_existing_adj['vals'].size(0)} negatives = {label_adj['vals'].size(0) + non_existing_adj['vals'].size(0)} total pairs"
             )
         else:
             non_existing_adj = tu.get_non_existing_edges(
@@ -224,14 +217,6 @@ class Link_Pred_Tasker:
 
         label_adj["idx"] = torch.cat([label_adj["idx"], non_existing_adj["idx"]])
         label_adj["vals"] = torch.cat([label_adj["vals"], non_existing_adj["vals"]])
-
-        print(
-            f"[LOG] Final label_adj shape: idx {label_adj['idx'].shape}, vals {label_adj['vals'].shape}"
-        )
-        print(f"[LOG] Sample idx={idx}, test={test}, positives={label_adj['vals'].size(0)}")
-        print(
-            f"[LOG] Sample ready: {num_active_nodes} active nodes, {len(hist_adj_list)} hist steps"
-        )
 
         return {
             "idx": idx,
