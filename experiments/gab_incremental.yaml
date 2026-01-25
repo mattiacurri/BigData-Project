@@ -2,8 +2,7 @@ data: gab  # Gab dataset for incremental training
 
 gab_args:
   folder: ./data/
-  # edges_file: notused.edg  # Not used anymore but kept for compatibility
-  aggr_time: 1  # Keep original snapshots (0-5)
+  # aggr_time: 1  # Rimosso - non si aggrega più temporalmente
 
 use_cuda: True
 use_logfile: True
@@ -41,6 +40,8 @@ early_stop_patience: 10  # Reduced for fine-tuning phases
 
 eval_after_epochs: 0  # Start evaluating from first epoch in incremental mode
 adj_mat_time_window: 1
+
+# TODO: da capire
 num_hist_steps: 1
 # hyperparameters tuning ranges (not used for now)
 num_hist_steps_min: 1

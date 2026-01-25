@@ -260,7 +260,9 @@ class TopK(torch.nn.Module):
 
         tanh = torch.nn.Tanh()
 
-        if isinstance(node_embs, torch.sparse.SparseTensor):
+        if isinstance(node_embs, torch.sparse.FloatTensor) or isinstance(
+            node_embs, torch.cuda.sparse.FloatTensor
+        ):
             node_embs = node_embs.to_dense()
 
         # Handle both 2D [nodes, features] and 3D [batch, nodes, features] tensors

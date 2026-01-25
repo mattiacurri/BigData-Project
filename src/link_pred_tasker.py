@@ -32,29 +32,9 @@ class Link_Pred_Tasker:
                 args: Configuration namespace.
                 dataset: Dataset object with edges and node features.
         """
-        self.data = dataset
-        # max_time for link pred should be one before
-        self.max_time = dataset.max_time - 1
+        self.dataset = dataset
         self.args = args
-        self.num_classes = 2
-
-        # Use dataset features (BERT embeddings)
-        self.feats_per_node = dataset.feats_per_node
-        print(f"Using {self.feats_per_node} features per node")
-
-        self.prepare_node_feats = self.build_prepare_node_feats(args, dataset)
-
-    def build_prepare_node_feats(self, args, dataset):
-        """Build the node feature preparation function.
-
-        Args:
-                args: Configuration namespace.
-                dataset: Dataset object.
-
-        Returns:
-                Function to prepare node features.
-        """
-        return self.data.prepare_node_feats
+        self.nodes = dataset.feats_per_node  # At this point, they are BERT embeddings
 
     def _remap_adj_to_active_nodes(self, adj, node_mapping, num_active_nodes):
         """Remap adjacency matrix indices to compacted active node space.
@@ -100,21 +80,26 @@ class Link_Pred_Tasker:
 
         return {"idx": new_idx, "vals": new_vals}
 
-    def _get_node_features_for_active_nodes(self, timestep, active_node_indices):
+    def _get_node_features_for_active_nodes(
+        self, timestep, active_node_indices, max_allowed_timestep=None
+    ):
         """Get node features only for active nodes.
 
         Args:
             timestep: Current timestep. Negative timesteps are clamped to 0.
             active_node_indices: Tensor of active node indices.
+            max_allowed_timestep: Maximum timestep to use for features (to avoid data leakage in test).
 
         Returns:
             Node features tensor of shape [num_active_nodes, feat_dim].
         """
         # Clamp negative timesteps to 0 - negative timesteps have no data anyway
         effective_timestep = max(0, timestep)
+        if max_allowed_timestep is not None:
+            effective_timestep = min(effective_timestep, max_allowed_timestep)
 
         # Get full features
-        full_feats = self.data.get_temporal_node_features(effective_timestep)
+        full_feats = self.dataset.get_temporal_node_features(effective_timestep)
 
         # Select only active nodes
         active_feats = full_feats[active_node_indices]
@@ -132,17 +117,15 @@ class Link_Pred_Tasker:
         Returns:
                 Dict with historical adjacencies, node features, and labels.
         """
-        hist_adj_list = []
-        hist_ndFeats_list = []
-        hist_mask_list = []
-        existing_nodes = []
+        hist_adj_list = []  # List of historical adjacency matrices
+        hist_ndFeats_list = []  # List of historical node features
+        hist_mask_list = []  # List of node masks
+        existing_nodes = []  # List of existing nodes for smart negative sampling
 
         # Get the number of nodes that exist at this snapshot (for memory efficiency)
         # Use only active nodes to reduce memory footprint significantly
-        num_active_nodes = self.data.get_num_nodes_at_snapshot(idx)
-        print(f"Snapshot {idx}: {num_active_nodes} active nodes")
-        active_node_indices = self.data.get_node_indices_at_snapshot(idx)
-        print(f"Total nodes in dataset: {self.data.num_nodes}")
+        num_active_nodes = self.dataset.get_num_nodes_at_snapshot(idx)
+        active_node_indices = self.dataset.get_node_indices_at_snapshot(idx)
 
         # Create a mapping from original node IDs to compacted IDs
         # This allows us to work with smaller tensors
@@ -155,8 +138,9 @@ class Link_Pred_Tasker:
         start_time = max(0, idx - self.args.num_hist_steps)
 
         for i in range(start_time, idx + 1):
+            # get the adjacency matrix
             cur_adj = tu.get_sp_adj(
-                edges=self.data.edges,
+                edges=self.dataset.edges,
                 time=i,
                 weighted=True,
                 time_window=self.args.adj_mat_time_window,
@@ -180,7 +164,10 @@ class Link_Pred_Tasker:
             node_mask = tu.get_node_mask(cur_adj, num_active_nodes)
 
             # Get temporal features for active nodes only
-            node_feats = self._get_node_features_for_active_nodes(i, active_node_indices)
+            max_allowed = idx - 1 if test else None
+            node_feats = self._get_node_features_for_active_nodes(
+                i, active_node_indices, max_allowed
+            )
 
             # Detach features to avoid keeping computation graph across timesteps
             node_feats = node_feats.detach()
@@ -194,7 +181,7 @@ class Link_Pred_Tasker:
 
         # Get label edges for the next timestep
         label_adj = tu.get_sp_adj(
-            edges=self.data.edges,
+            edges=self.dataset.edges,
             time=idx + 1,
             weighted=False,
             time_window=self.args.adj_mat_time_window,
@@ -202,7 +189,10 @@ class Link_Pred_Tasker:
 
         # Remap label_adj to compacted space
         label_adj = self._remap_adj_to_active_nodes(label_adj, node_mapping, num_active_nodes)
-
+        print(f"[LOG] NUM ACTIVE NODES: {num_active_nodes}")
+        print(
+            f"[LOG] Label adj before negative sampling: idx {label_adj['idx'].shape}, vals {label_adj['vals'].shape}"
+        )
         if test:
             neg_mult = self.args.negative_mult_test
         else:
@@ -213,24 +203,12 @@ class Link_Pred_Tasker:
         else:
             existing_nodes = None
 
-        # if "all_edges" in kwargs.keys() and kwargs["all_edges"] == True:
-        #     # Use max_negative_test_edges if configured to limit memory usage
-        #     max_neg = getattr(self.args, "max_negative_test_edges", None)
-        #     non_existing_adj = tu.get_all_non_existing_edges(
-        #         adj=label_adj, tot_nodes=num_active_nodes, max_edges=max_neg
-        #     )
-        # else:
-        #     non_existing_adj = tu.get_non_existing_edges(
-        #         adj=label_adj,
-        #         number=label_adj["vals"].size(0) * neg_mult,
-        #         tot_nodes=num_active_nodes,
-        #         smart_sampling=self.args.smart_neg_sampling,
-        #         existing_nodes=existing_nodes,
-        #     )
-
         if "all_edges" in kwargs.keys() and kwargs["all_edges"] == True:
             non_existing_adj = tu.get_all_non_existing_edges(
                 adj=label_adj, tot_nodes=num_active_nodes
+            )
+            print(
+                f"[LOG] Test mode with all_edges=True: {label_adj['vals'].size(0)} positives + {non_existing_adj['vals'].size(0)} negatives = {label_adj['vals'].size(0) + non_existing_adj['vals'].size(0)} total pairs"
             )
         else:
             non_existing_adj = tu.get_non_existing_edges(
@@ -240,9 +218,20 @@ class Link_Pred_Tasker:
                 smart_sampling=self.args.smart_neg_sampling,
                 existing_nodes=existing_nodes,
             )
+            print(
+                f"[LOG] Training mode: {label_adj['vals'].size(0)} positives + {non_existing_adj['vals'].size(0)} negatives (mult={neg_mult}) = {label_adj['vals'].size(0) + non_existing_adj['vals'].size(0)} total pairs"
+            )
 
         label_adj["idx"] = torch.cat([label_adj["idx"], non_existing_adj["idx"]])
         label_adj["vals"] = torch.cat([label_adj["vals"], non_existing_adj["vals"]])
+
+        print(
+            f"[LOG] Final label_adj shape: idx {label_adj['idx'].shape}, vals {label_adj['vals'].shape}"
+        )
+        print(f"[LOG] Sample idx={idx}, test={test}, positives={label_adj['vals'].size(0)}")
+        print(
+            f"[LOG] Sample ready: {num_active_nodes} active nodes, {len(hist_adj_list)} hist steps"
+        )
 
         return {
             "idx": idx,

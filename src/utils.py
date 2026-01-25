@@ -59,19 +59,19 @@ def sp_ignore_batch_dim(tensor_dict):
     return tensor_dict
 
 
-def aggregate_by_time(time_vector, time_win_aggr):
-    """Aggregate time steps by specified window size.
+# def aggregate_by_time(time_vector, time_win_aggr):
+#     """Aggregate time steps by specified window size.
 
-    Args:
-        time_vector: Vector of timestamps.
-        time_win_aggr: Time window for aggregation.
+#     Args:
+#         time_vector: Vector of timestamps.
+#         time_win_aggr: Time window for aggregation.
 
-    Returns:
-        Aggregated time vector.
-    """
-    time_vector = time_vector - time_vector.min()
-    time_vector = time_vector // time_win_aggr
-    return time_vector
+#     Returns:
+#         Aggregated time vector.
+#     """
+#     time_vector = time_vector - time_vector.min()
+#     time_vector = time_vector // time_win_aggr
+#     return time_vector
 
 
 def reset_param(t):
@@ -101,7 +101,7 @@ def make_sparse_tensor(adj, tensor_type, torch_size):
         tensor_size = torch.Size(torch_size * 2)
 
     if tensor_type == "float":
-        test = torch.sparse_coo_tensor(adj["idx"].t(), adj["vals"].type(torch.float), tensor_size)
+        # test = torch.sparse_coo_tensor(adj["idx"].t(), adj["vals"].type(torch.float), tensor_size)
         return torch.sparse_coo_tensor(adj["idx"].t(), adj["vals"].type(torch.float), tensor_size)
     elif tensor_type == "long":
         return torch.sparse_coo_tensor(adj["idx"].t(), adj["vals"].type(torch.long), tensor_size)
@@ -182,9 +182,10 @@ def parse_args(parser):
         args.learning_rate, args.learning_rate_min, args.learning_rate_max, type="logscale"
     )
     # args.adj_mat_time_window = random_param_value(args.adj_mat_time_window, args.adj_mat_time_window_min, args.adj_mat_time_window_max, type='int')
-    args.num_hist_steps = random_param_value(
-        args.num_hist_steps, args.num_hist_steps_min, args.num_hist_steps_max, type="int"
-    )
+    # args.num_hist_steps = random_param_value(
+    #     args.num_hist_steps, args.num_hist_steps_min, args.num_hist_steps_max, type="int"
+    # )
+
     args.gcn_parameters["feats_per_node"] = random_param_value(
         args.gcn_parameters["feats_per_node"],
         args.gcn_parameters["feats_per_node_min"],

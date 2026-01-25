@@ -21,7 +21,7 @@ import utils
 class Logger:
     """Logger for experiment metrics and training progress."""
 
-    def __init__(self, args, num_classes, minibatch_log_interval=10):
+    def __init__(self, args, num_classes=2, minibatch_log_interval=10):
         """Initialize the logger.
 
         Args:
@@ -80,9 +80,8 @@ class Logger:
             set: Dataset split (TRAIN/VALID/TEST).
             minibatch_log_interval: Optional override for logging interval.
         """
-        # ALDO
         self.epoch = epoch
-        ######
+
         self.set = set
         self.losses = []
         self.errors = []
@@ -394,7 +393,7 @@ class Logger:
 
         return average_precision_score(true_classes_np, predictions_np)
 
-    def eval_predicitions(self, predictions, true_classes, num_classes):
+    def eval_predicitions(self, predictions, true_classes, num_classes=2):
         """Evaluate predictions and compute confusion matrix metrics.
 
         Args:
@@ -429,7 +428,7 @@ class Logger:
             conf_mat_per_class.false_positives[cl] = fp
         return error, conf_mat_per_class
 
-    def eval_predicitions_at_k(self, predictions, true_classes, num_classes, k):
+    def eval_predicitions_at_k(self, predictions, true_classes, num_classes=2, k=10):
         """Evaluate predictions at top-k.
 
         Args:
@@ -509,7 +508,6 @@ class Logger:
         Returns:
             tuple: (precision, recall, F1-score)
         """
-        # ALDO
         if type(tp) is dict:
             tp_sum = tp[class_id].item()
             fn_sum = fn[class_id].item()
@@ -518,7 +516,7 @@ class Logger:
             tp_sum = tp.item()
             fn_sum = fn.item()
             fp_sum = fp.item()
-        ########
+
         if tp_sum == 0:
             return 0, 0, 0
 

@@ -109,30 +109,21 @@ def make_sparse_eye(size):
     return eye
 
 
-def get_all_non_existing_edges(adj, tot_nodes, max_edges=None):
+def get_all_non_existing_edges(adj, tot_nodes):
     """Get all non-existing edges in the graph.
 
     Args:
         adj: Adjacency dict with existing edges.
         tot_nodes: Total number of nodes.
-        max_edges: Maximum number of negative edges to return. If None, returns all.
-                   Use this to limit memory usage for large graphs.
 
     Returns:
-        Dict with all non-existing edge pairs (or sampled subset if max_edges specified).
+        Dict with all non-existing edge pairs.
     """
     true_ids = adj["idx"].t().numpy()
     true_ids_set = set(get_edges_ids(true_ids, tot_nodes))
-    num_positive = len(true_ids_set)
 
-    total_possible = tot_nodes * tot_nodes - num_positive
+    # total_possible = tot_nodes * tot_nodes - num_positive
 
-    # If max_edges is set and less than total, sample instead of enumerating all
-    if max_edges is not None and max_edges < total_possible:
-        # Use efficient sampling instead of generating all edges
-        return _sample_non_existing_edges_efficient(true_ids_set, tot_nodes, max_edges)
-
-    # Original behavior: enumerate all edges (memory intensive!)
     all_edges_idx = np.arange(tot_nodes)
     all_edges_idx = np.array(np.meshgrid(all_edges_idx, all_edges_idx)).reshape(2, -1)
 

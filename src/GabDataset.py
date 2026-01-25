@@ -5,7 +5,7 @@ Loads and preprocesses temporal graph data from social network interactions.
 
 from pathlib import Path
 import pickle
-from typing import Dict, Optional
+from typing import Dict
 
 import pandas as pd
 import torch
@@ -39,97 +39,55 @@ class GabDataset:
 
         self.ecols = u.Namespace({"FromNodeId": 0, "ToNodeId": 1, "Weight": 2, "TimeStep": 3})
 
-        # Load ALL snapshots to initialize the dataset structure
-        print("Loading all snapshots for dataset initialization...")
         edges_df = self._load_all_snapshots()
 
-        edges = torch.tensor(edges_df[["X", "Y", "Label", "Snapshot"]].values, dtype=torch.float32)
+        edges = torch.tensor(
+            edges_df[["FromNodeId", "ToNodeId", "Weight", "TimeStep"]].values, dtype=torch.float32
+        )
         edges = self.make_contigous_node_ids(edges)
 
         # Save args for later use
         self.args_gab = args.gab_args
 
         # Compute nodes per snapshot for incremental learning
-        timesteps = u.aggregate_by_time(edges[:, self.ecols.TimeStep], args.gab_args.aggr_time)
+        # timesteps = u.aggregate_by_time(edges[:, self.ecols.TimeStep], args.gab_args.aggr_time)
+        timesteps = edges[:, self.ecols.TimeStep]  # Usa timestamp originali senza aggregazione
         self.max_time = timesteps.max()
         self.min_time = timesteps.min()
-        edges[:, self.ecols.TimeStep] = timesteps
+        # edges[:, self.ecols.TimeStep] = timesteps  # Non necessario se non modifichiamo
 
         # Track which nodes appear in each snapshot (for incremental learning)
-        self._compute_nodes_per_snapshot(edges)
+        self._compute_nodes_per_snapshot(
+            edges
+        )  # mask the nodes that do not exist yet at each snapshot
 
-        # Total number of nodes across ALL snapshots (for backward compatibility)
-        num_nodes = edges[:, [self.ecols.FromNodeId, self.ecols.ToNodeId]].unique().size(0)
+        # For link prediction, all loaded edges are positive (existing connections)
+        edges[:, self.ecols.Weight] = 1.0
 
-        # edges +1: positive
-        # edges -1: negative
-        # separate
-        # majority voting for the final label
-        edges[:, self.ecols.Weight] = (
-            self.cluster_negs_and_positives()
-        )  # edges[:, self.ecols.Weight])
-
-        # separate classes
+        # Create sparse representation for edges
         sp_indices = (
             edges[:, [self.ecols.FromNodeId, self.ecols.ToNodeId, self.ecols.TimeStep]].long().t()
         )
         sp_values = edges[:, self.ecols.Weight]
 
-        neg_mask = sp_values == -1
-
-        neg_sp_indices = sp_indices[:, neg_mask]
-        neg_sp_values = sp_values[neg_mask]
-        neg_sp_edges = torch.sparse_coo_tensor(
-            neg_sp_indices,
-            neg_sp_values,
-            size=(num_nodes, num_nodes, int(self.max_time.item()) + 1),
-        ).coalesce()
-
-        pos_mask = sp_values == 1
-
-        pos_sp_indices = sp_indices[:, pos_mask]
-        pos_sp_values = sp_values[pos_mask]
-
-        pos_sp_edges = torch.sparse_coo_tensor(
-            pos_sp_indices,
-            pos_sp_values,
-            size=(num_nodes, num_nodes, int(self.max_time.item()) + 1),
-        ).coalesce()
-
-        # scale positive class to separate after adding
-        # we ensure that if it's a positive label it will be >0 after substraction
-        pos_sp_edges *= 1000
-
-        # we substract the neg_sp_edges to make the values positive
-        sp_edges = (pos_sp_edges - neg_sp_edges).coalesce()
-
-        # separating negs and positive edges per edge/timestamp
-        vals = sp_edges._values()
-        neg_vals = vals % 1000
-        pos_vals = vals // 1000
-        # We add the negative and positive scores and do majority voting
-        vals = pos_vals - neg_vals
-        # creating labels new_vals -> the label of the edges
-        new_vals = torch.zeros(vals.size(0), dtype=torch.long)
-        new_vals[vals > 0] = 1
-        new_vals[vals <= 0] = 0
-        indices_labels = torch.cat([sp_edges._indices().t(), new_vals.view(-1, 1)], dim=1)
-
-        # # the weight of the edges (vals), is simply the number of edges between two entities at each time_step
-        # vals = pos_vals + neg_vals
+        # Create labels: all existing edges are positive (1)
+        new_vals = torch.ones(sp_values.size(0), dtype=torch.long)
+        # [from, to, time, label]
+        indices_labels = torch.cat([sp_indices.t(), new_vals.view(-1, 1)], dim=1)
 
         # Unweighted graph: all edges have weight 1
-        vals = torch.ones(vals.size(0), dtype=torch.float32)
+        vals = torch.ones(sp_values.size(0), dtype=torch.float32)
 
         self.edges = {"idx": indices_labels, "vals": vals}
-        self.num_nodes = num_nodes
-        self.num_classes = 2
+        # Total number of nodes across all snapshots
+        # !!! For now, we are excluding users without connections across all snapshots
+        self.num_nodes = edges[:, [self.ecols.FromNodeId, self.ecols.ToNodeId]].unique().size(0)
 
         # Create post-to-snapshot mapping
         self.post_to_snapshot, self.post_to_user = self._create_post_mappings(args.gab_args)
 
         # Create user ID mapping
-        unique_users = set(edges_df["X"].unique()) | set(edges_df["Y"].unique())
+        unique_users = set(edges_df["FromNodeId"].unique()) | set(edges_df["ToNodeId"].unique())
         original_user_ids = sorted(list(unique_users))
         self.user_id_to_node_idx = {user_id: idx for idx, user_id in enumerate(original_user_ids)}
         self.node_idx_to_user_id = {
@@ -138,6 +96,10 @@ class GabDataset:
 
         # Embeddings file path (loaded on-demand in get_temporal_node_features)
         self._embeddings_file = Path(args.gab_args.folder) / "raw" / "bert_features_real_posts.pkl"
+
+        with open(self._embeddings_file, "rb") as f:
+            self.all_embeddings = pickle.load(f)
+
         self.feats_per_node = 768  # BERT embedding dimension
 
         print(f"Features per node: {self.feats_per_node}")
@@ -188,10 +150,10 @@ class GabDataset:
 
             snapshot_df = pd.DataFrame(
                 {
-                    "X": edges[:, 0].numpy(),
-                    "Y": edges[:, 1].numpy(),
-                    "Snapshot": snapshot_idx,
-                    "Label": 1,
+                    "FromNodeId": edges[:, 0].numpy(),
+                    "ToNodeId": edges[:, 1].numpy(),
+                    "TimeStep": snapshot_idx,
+                    "Weight": 1,
                 }
             )
 
@@ -214,11 +176,11 @@ class GabDataset:
             snapshot_idx: Index of the snapshot to load.
 
         Returns:
-            DataFrame with columns ['X', 'Y', 'Snapshot', 'Label'].
+            DataFrame with columns ['FromNodeId', 'ToNodeId', 'TimeStep', 'Weight'].
         """
         if snapshot_idx in self.loaded_snapshots:
             print(f"Snapshot {snapshot_idx} already loaded, skipping...")
-            return pd.DataFrame(columns=["X", "Y", "Snapshot", "Label"])
+            return pd.DataFrame(columns=["FromNodeId", "ToNodeId", "TimeStep", "Weight"])
 
         if snapshot_idx >= len(self.time_periods):
             raise ValueError(
@@ -240,10 +202,10 @@ class GabDataset:
 
         snapshot_df = pd.DataFrame(
             {
-                "X": edges[:, 0].numpy(),
-                "Y": edges[:, 1].numpy(),
-                "Snapshot": snapshot_idx,
-                "Label": 1,
+                "FromNodeId": edges[:, 0].numpy(),
+                "ToNodeId": edges[:, 1].numpy(),
+                "TimeStep": snapshot_idx,
+                "Weight": 1,
             }
         )
 
@@ -291,14 +253,17 @@ class GabDataset:
         edges_df = pd.concat(all_edges_list, ignore_index=True)
 
         # Convert to tensor
-        edges = torch.tensor(edges_df[["X", "Y", "Label", "Snapshot"]].values, dtype=torch.float32)
+        edges = torch.tensor(
+            edges_df[["FromNodeId", "ToNodeId", "Weight", "TimeStep"]].values, dtype=torch.float32
+        )
         edges = self.make_contigous_node_ids(edges)
 
         # Process edges (same as original __init__)
-        timesteps = u.aggregate_by_time(edges[:, self.ecols.TimeStep], self.args_gab.aggr_time)
+        # timesteps = u.aggregate_by_time(edges[:, self.ecols.TimeStep], self.args_gab.aggr_time)
+        timesteps = edges[:, self.ecols.TimeStep]  # Usa timestamp originali senza aggregazione
         self.max_time = timesteps.max()
         self.min_time = timesteps.min()
-        edges[:, self.ecols.TimeStep] = timesteps
+        # edges[:, self.ecols.TimeStep] = timesteps  # Non necessario se non modifichiamo
 
         # Update nodes per snapshot
         self._compute_nodes_per_snapshot(edges)
@@ -306,54 +271,28 @@ class GabDataset:
         # Update total number of nodes
         num_nodes = edges[:, [self.ecols.FromNodeId, self.ecols.ToNodeId]].unique().size(0)
 
-        # Process labels
-        edges[:, self.ecols.Weight] = self.cluster_negs_and_positives()
+        # For link prediction, all loaded edges are positive (existing connections)
+        edges[:, self.ecols.Weight] = 1.0
 
-        # Create sparse representation (same as __init__)
+        # Create sparse representation for edges
         sp_indices = (
             edges[:, [self.ecols.FromNodeId, self.ecols.ToNodeId, self.ecols.TimeStep]].long().t()
         )
         sp_values = edges[:, self.ecols.Weight]
 
-        neg_mask = sp_values == -1
-        neg_sp_indices = sp_indices[:, neg_mask]
-        neg_sp_values = sp_values[neg_mask]
-        neg_sp_edges = torch.sparse_coo_tensor(
-            neg_sp_indices,
-            neg_sp_values,
-            size=(num_nodes, num_nodes, int(self.max_time.item()) + 1),
-        ).coalesce()
+        # Create labels: all existing edges are positive (1)
+        new_vals = torch.ones(sp_values.size(0), dtype=torch.long)
+        # [from, to, time, label]
+        indices_labels = torch.cat([sp_indices.t(), new_vals.view(-1, 1)], dim=1)
 
-        pos_mask = sp_values == 1
-        pos_sp_indices = sp_indices[:, pos_mask]
-        pos_sp_values = sp_values[pos_mask]
-        pos_sp_edges = torch.sparse_coo_tensor(
-            pos_sp_indices,
-            pos_sp_values,
-            size=(num_nodes, num_nodes, int(self.max_time.item()) + 1),
-        ).coalesce()
-
-        pos_sp_edges *= 1000
-        sp_edges = (pos_sp_edges - neg_sp_edges).coalesce()
-
-        vals = sp_edges._values()
-        neg_vals = vals % 1000
-        pos_vals = vals // 1000
-        vals = pos_vals - neg_vals
-
-        new_vals = torch.zeros(vals.size(0), dtype=torch.long)
-        new_vals[vals > 0] = 1
-        new_vals[vals <= 0] = 0
-        indices_labels = torch.cat([sp_edges._indices().t(), new_vals.view(-1, 1)], dim=1)
-
-        vals = torch.ones(vals.size(0), dtype=torch.float32)
+        vals = torch.ones(sp_values.size(0), dtype=torch.float32)
 
         # Update dataset attributes
         self.edges = {"idx": indices_labels, "vals": vals}
         self.num_nodes = num_nodes
 
         # Update user ID mappings
-        unique_users = set(edges_df["X"].unique()) | set(edges_df["Y"].unique())
+        unique_users = set(edges_df["FromNodeId"].unique()) | set(edges_df["ToNodeId"].unique())
         original_user_ids = sorted(list(unique_users))
         self.user_id_to_node_idx = {user_id: idx for idx, user_id in enumerate(original_user_ids)}
         self.node_idx_to_user_id = {
@@ -381,10 +320,10 @@ class GabDataset:
         edges = self._load_edg_file(edges_file)
         snapshot_df = pd.DataFrame(
             {
-                "X": edges[:, 0].numpy(),
-                "Y": edges[:, 1].numpy(),
-                "Snapshot": snapshot_idx,
-                "Label": 1,
+                "FromNodeId": edges[:, 0].numpy(),
+                "ToNodeId": edges[:, 1].numpy(),
+                "TimeStep": snapshot_idx,
+                "Weight": 1,
             }
         )
         return snapshot_df
@@ -453,22 +392,6 @@ class GabDataset:
         # # Fallback to all nodes
         # return torch.arange(self.num_nodes, dtype=torch.long)
 
-    def cluster_negs_and_positives(self):  # , ratings):
-        """Convert ratings to binary labels (+1/-1).
-
-        Args:
-            ratings: Rating values (positive or negative).
-
-        Returns:
-            Binary tensor with +1 for positive, -1 for negative/zero ratings.
-        """
-        # pos_indices = ratings > 0
-        # neg_indices = ratings <= 0
-        # ratings[pos_indices] = 1
-        # ratings[neg_indices] = -1
-        # return ratings
-        return 1
-
     def _create_post_mappings(self, gab_args) -> tuple[Dict[int, int], Dict[int, int]]:
         """Create mappings from post_id to snapshot and post_id to user_id.
 
@@ -518,19 +441,14 @@ class GabDataset:
             Tensor of shape [self.num_nodes, embedding_dim] with temporal features.
             Nodes without features or that don't exist yet have zero vectors.
         """
+        # ??? For now we are doing in this way
+        # train on snapshot 0 -> mean(emb_0)
+        # test on snapshot 1 -> mean(emb_0)
+        # train on snapshot 1 -> mean(emb_0, emb_1)
+        # test on snapshot 2 -> mean(emb_0, emb_1)
+
         # Get nodes that exist at this snapshot for filtering
         nodes_at_snapshot = set(self.get_node_indices_at_snapshot(max_snapshot).tolist())
-
-        # Load embeddings directly from disk (don't keep in memory)
-        # This trades CPU for RAM
-        if not self._embeddings_file.exists():
-            raise FileNotFoundError(f"Embeddings file not found: {self._embeddings_file}")
-
-        print(f"Loading embeddings for snapshot {max_snapshot}...")
-        import pickle
-
-        with open(self._embeddings_file, "rb") as f:
-            all_embeddings = pickle.load(f)
 
         # Initialize feature matrix for ALL nodes
         node_features = torch.zeros(self.num_nodes, self.feats_per_node, dtype=torch.float32)
@@ -538,7 +456,7 @@ class GabDataset:
         # Group posts by user, filtering by snapshot
         user_embeddings: Dict[int, list] = {}
 
-        for post_id, embedding in all_embeddings.items():
+        for post_id, embedding in self.all_embeddings.items():
             # Check if post exists in our mappings and is within snapshot range
             if post_id in self.post_to_snapshot and post_id in self.post_to_user:
                 post_snapshot = self.post_to_snapshot[post_id]
@@ -556,9 +474,6 @@ class GabDataset:
                                 user_embeddings[user_id] = []
                             user_embeddings[user_id].append(embedding)
 
-        # Free memory from raw embeddings
-        del all_embeddings
-
         # Compute average embedding for each user
         users_with_features = 0
         for user_id, embeddings in user_embeddings.items():
@@ -570,26 +485,7 @@ class GabDataset:
 
         num_nodes_at_snapshot = len(nodes_at_snapshot)
 
-        print(
-            f"Computed temporal features for snapshot {max_snapshot}: "
-            f"{users_with_features}/{num_nodes_at_snapshot} active nodes with features "
-            f"({100 * users_with_features / num_nodes_at_snapshot:.1f}% coverage), "
-            f"tensor shape: {node_features.shape}"
-        )
         return node_features
-
-    def prepare_node_feats(self, node_feats):
-        """Prepare node features for model input.
-
-        Args:
-            node_feats: Raw node features (can be temporal).
-
-        Returns:
-            Processed node features.
-        """
-        # node_feats is already a tensor with shape [num_nodes, embedding_dim]
-        # Just ensure it's float for model compatibility
-        return node_feats.float()
 
     def edges_to_sp_dict(self, edges):
         """Convert edge list to sparse dictionary format.

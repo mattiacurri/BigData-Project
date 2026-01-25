@@ -19,7 +19,7 @@ import utils as u
 class Trainer:
     """Trainer for GCN-based models on temporal graph tasks."""
 
-    def __init__(self, args, splitter, gcn, classifier, comp_loss, dataset, num_classes):
+    def __init__(self, args, splitter, gcn, classifier, comp_loss, dataset, num_classes=2):
         """Initialize the trainer.
 
         Args:
@@ -208,12 +208,23 @@ class Trainer:
         """
         nodes_embs = self.gcn(hist_adj_list, hist_ndFeats_list, mask_list)
 
+        print(
+            f"[LOG] Predict: nodes_embs shape {nodes_embs.shape}, node_indices shape {node_indices.shape}"
+        )
+
+        # !
         predict_batch_size = 100000
         gather_predictions = []
-        for i in range(1 + (node_indices.size(1) // predict_batch_size)):
-            cls_input = self.gather_node_embs(
-                nodes_embs, node_indices[:, i * predict_batch_size : (i + 1) * predict_batch_size]
-            )
+
+        print(
+            f"[LOG] Predict: processing {node_indices.size(1)} pairs in batches of {predict_batch_size}"
+        )
+
+        for i in tqdm.tqdm(
+            range(1 + (node_indices.size(1) // predict_batch_size)), desc="Gathering predictions"
+        ):
+            batch_indices = node_indices[:, i * predict_batch_size : (i + 1) * predict_batch_size]
+            cls_input = self.gather_node_embs(nodes_embs, batch_indices)
             predictions = self.classifier(cls_input)
             # Detach predictions during inference to avoid keeping computation graph
             if not self.gcn.training:
@@ -242,8 +253,12 @@ class Trainer:
         """
         cls_input = []
 
-        for node_set in node_indices:
-            cls_input.append(nodes_embs[node_set])
+        for j, node_set in enumerate(node_indices):
+            emb = nodes_embs[node_set]
+            cls_input.append(emb)
+
+        # input to classifier is concatenation of node embeddings along feature dimension
+        # [emb_u, emb_v]
         return torch.cat(cls_input, dim=1)
 
     def optim_step(self, loss):
@@ -285,7 +300,7 @@ class Trainer:
             adj = u.sparse_prepare_tensor(adj, torch_size=[num_nodes_in_sample])
             sample.hist_adj_list[i] = adj.to(self.args.device)
 
-            nodes = self.tasker.prepare_node_feats(node_feats)
+            nodes = node_feats
 
             sample.hist_ndFeats_list[i] = nodes.to(self.args.device)
 
@@ -300,9 +315,7 @@ class Trainer:
         label_sp = self.ignore_batch_dim(sample.label_sp)
 
         if self.args.task in ["link_pred", "edge_cls"]:
-            label_sp["idx"] = (
-                label_sp["idx"].to(self.args.device).t()
-            )  ####### ALDO TO CHECK why there was the .t() -----> because I concatenate embeddings when there are pairs of them, the embeddings are row vectors after the transpose
+            label_sp["idx"] = label_sp["idx"].to(self.args.device).t()
         else:
             label_sp["idx"] = label_sp["idx"].to(self.args.device)
 
@@ -357,7 +370,7 @@ class Trainer:
         """
         csv_node_embs = []
         for node_id in indexes:
-            orig_ID = torch.DoubleTensor([self.tasker.data.contID_to_origID[node_id]])
+            orig_ID = torch.DoubleTensor([self.tasker.dataset.contID_to_origID[node_id]])
 
             csv_node_embs.append(
                 torch.cat((orig_ID, nodes_embs[node_id].double())).detach().numpy()
@@ -520,7 +533,7 @@ class Trainer:
             all_results: List of results from each phase.
         """
         print(f"\n{'=' * 60}")
-        print("INCREMENTAL TRAINING SUMMARY")
+        print("SUMMARY")
         print(f"{'=' * 60}")
 
         for result in all_results:

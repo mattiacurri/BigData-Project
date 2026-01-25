@@ -138,7 +138,7 @@ def build_gcn(args, tasker):
             NotImplementedError: If the specified model is not recognized.
     """
     gcn_args = u.Namespace(args.gcn_parameters)
-    gcn_args.feats_per_node = tasker.feats_per_node
+    gcn_args.feats_per_node = tasker.nodes  # BERT Embeddings
     if args.model == "gcn":
         return mls.Sp_GCN(gcn_args, activation=torch.nn.RReLU()).to(args.device)
     elif args.model == "skipgcn":
@@ -179,15 +179,11 @@ def build_classifier(args, tasker):
     if "gru" in args.model or "lstm" in args.model:
         in_feats = args.gcn_parameters["lstm_l2_feats"] * mult
     elif args.model == "skipfeatsgcn" or args.model == "skipfeatsegcn_h":
-        in_feats = (
-            args.gcn_parameters["layer_2_feats"] + args.gcn_parameters["feats_per_node"]
-        ) * mult
+        in_feats = (args.gcn_parameters["layer_2_feats"] + tasker.nodes) * mult
     else:
         in_feats = args.gcn_parameters["layer_2_feats"] * mult
 
-    return mls.Classifier(args, in_features=in_feats, out_features=tasker.num_classes).to(
-        args.device
-    )
+    return mls.Classifier(args, in_features=in_feats).to(args.device)
 
 
 if __name__ == "__main__":
@@ -252,7 +248,6 @@ if __name__ == "__main__":
         classifier=classifier,
         comp_loss=cross_entropy,
         dataset=dataset,
-        num_classes=tasker.num_classes,
     )
 
     # if args.incremental:

@@ -26,14 +26,14 @@ class splitter:
         # only the training one requires special handling on start, the others are fine with the split IDX.
         # Convert min_time and max_time to int if they're tensors
         min_time_val = (
-            int(tasker.data.min_time.item())
-            if torch.is_tensor(tasker.data.min_time)
-            else int(tasker.data.min_time)
+            int(tasker.dataset.min_time.item())
+            if torch.is_tensor(tasker.dataset.min_time)
+            else int(tasker.dataset.min_time)
         )
         max_time_val = (
-            int(tasker.data.max_time.item())
-            if torch.is_tensor(tasker.data.max_time)
-            else int(tasker.data.max_time)
+            int(tasker.dataset.max_time.item())
+            if torch.is_tensor(tasker.dataset.max_time)
+            else int(tasker.dataset.max_time)
         )
 
         start = min_time_val + args.num_hist_steps  # -1 + args.adj_mat_time_window
@@ -95,14 +95,14 @@ class incremental_splitter:
 
         # Convert min_time and max_time to int if they're tensors
         min_time_val = (
-            int(tasker.data.min_time.item())
-            if torch.is_tensor(tasker.data.min_time)
-            else int(tasker.data.min_time)
+            int(tasker.dataset.min_time.item())
+            if torch.is_tensor(tasker.dataset.min_time)
+            else int(tasker.dataset.min_time)
         )
         max_time_val = (
-            int(tasker.data.max_time.item())
-            if torch.is_tensor(tasker.data.max_time)
-            else int(tasker.data.max_time)
+            int(tasker.dataset.max_time.item())
+            if torch.is_tensor(tasker.dataset.max_time)
+            else int(tasker.dataset.max_time)
         )
 
         self.min_time = min_time_val
@@ -113,27 +113,17 @@ class incremental_splitter:
         self.valid_start = min_time_val + args.num_hist_steps
         self.valid_end = max_time_val + 1
 
-        # Determine number of snapshots
-        # Handle None, 'None', and numeric values
-        # if hasattr(args, "num_snapshots") and args.num_snapshots is not None:
-        #     if isinstance(args.num_snapshots, str) and args.num_snapshots.lower() == "none":
-        #         # Default: each time step is a snapshot
-        #         self.num_snapshots = self.valid_end - self.valid_start
-        #     else:
-        #         self.num_snapshots = int(args.num_snapshots)
-        # else:
-        #     # Default: each time step is a snapshot
         self.num_snapshots = self.valid_end - self.valid_start
 
         # Create snapshot boundaries
         self.snapshot_boundaries = self._compute_snapshot_boundaries()
         self.snapshots = self._create_snapshots()
 
-        print(f"\nIncremental Splitter initialized:")
-        print(f"  Time range: [{self.valid_start}, {self.valid_end})")
-        print(f"  Number of snapshots: {len(self.snapshots)}")
-        for i, (start, end) in enumerate(self.snapshot_boundaries):
-            print(f"    Snapshot {i}: time [{start}, {end}), size={end - start}")
+        # print(f"\nIncremental Splitter initialized:")
+        # print(f"  Time range: [{self.valid_start}, {self.valid_end})")
+        # print(f"  Number of snapshots: {len(self.snapshots)}")
+        # for i, (start, end) in enumerate(self.snapshot_boundaries):
+        #     print(f"    Snapshot {i}: time [{start}, {end}), size={end - start}")
 
     def _compute_snapshot_boundaries(self) -> List[tuple]:
         """Compute the time boundaries for each snapshot.
@@ -192,30 +182,6 @@ class incremental_splitter:
         # Store both versions
         self._test_snapshots = test_snapshots
         return train_snapshots
-
-    # def get_all_snapshots(self) -> List[DataLoader]:
-    #     """Get all snapshot DataLoaders.
-
-    #     Returns:
-    #         List of DataLoaders for all snapshots.
-    #     """
-    #     return self.snapshots
-
-    # def get_snapshot(self, idx: int) -> DataLoader:
-    #     """Get a specific snapshot by index.
-
-    #     Args:
-    #         idx: Snapshot index.
-
-    #     Returns:
-    #         DataLoader for the requested snapshot.
-
-    #     Raises:
-    #         IndexError: If idx is out of range.
-    #     """
-    #     if idx < 0 or idx >= len(self.snapshots):
-    #         raise IndexError(f"Snapshot index {idx} out of range [0, {len(self.snapshots)})")
-    #     return self.snapshots[idx]
 
     def get_train_test_pairs(self) -> List[tuple]:
         """Get pairs of (train_snapshot, test_snapshot) for incremental training.
