@@ -6,7 +6,6 @@ Taken from: https://github.com/IBM/EvolveGCN/blob/master/utils.py
 import argparse
 import math
 import random
-import time
 
 import numpy as np
 import torch
@@ -102,10 +101,10 @@ def make_sparse_tensor(adj, tensor_type, torch_size):
         tensor_size = torch.Size(torch_size * 2)
 
     if tensor_type == "float":
-        test = torch.sparse.FloatTensor(adj["idx"].t(), adj["vals"].type(torch.float), tensor_size)
-        return torch.sparse.FloatTensor(adj["idx"].t(), adj["vals"].type(torch.float), tensor_size)
+        test = torch.sparse_coo_tensor(adj["idx"].t(), adj["vals"].type(torch.float), tensor_size)
+        return torch.sparse_coo_tensor(adj["idx"].t(), adj["vals"].type(torch.float), tensor_size)
     elif tensor_type == "long":
-        return torch.sparse.LongTensor(adj["idx"].t(), adj["vals"].type(torch.long), tensor_size)
+        return torch.sparse_coo_tensor(adj["idx"].t(), adj["vals"].type(torch.long), tensor_size)
     else:
         raise NotImplementedError("only make floats or long sparse tensors")
 
@@ -173,7 +172,7 @@ def parse_args(parser):
     """
     args = parser.parse_args()
     if args.config_file:
-        data = yaml.load(args.config_file, Loader=yaml.FullLoader)
+        data = yaml.safe_load(args.config_file)
         delattr(args, "config_file")
         arg_dict = args.__dict__
         for key, value in data.items():

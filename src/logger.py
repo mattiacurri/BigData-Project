@@ -10,7 +10,6 @@ import pprint
 import sys
 import time
 
-import matplotlib.pyplot as plt
 import numpy as np
 from scipy.sparse import coo_matrix
 from sklearn.metrics import average_precision_score

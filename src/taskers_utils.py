@@ -30,7 +30,7 @@ def get_sp_adj(edges, time, weighted, time_window):
     subset = subset * (idx[:, ECOLS.time] > (time - time_window))
     idx = edges["idx"][subset][:, [ECOLS.source, ECOLS.target]]
     vals = edges["vals"][subset]
-    out = torch.sparse.FloatTensor(idx.t(), vals).coalesce()
+    out = torch.sparse_coo_tensor(idx.t(), vals).coalesce()
 
     idx = out._indices().t()
     if weighted:
@@ -74,8 +74,8 @@ def normalize_adj(adj, num_nodes):
     idx = adj["idx"]
     vals = adj["vals"]
 
-    sp_tensor = torch.sparse.FloatTensor(
-        idx.t(), vals.type(torch.float), torch.Size([num_nodes, num_nodes])
+    sp_tensor = torch.sparse_coo_tensor(
+        idx.t(), vals.type(torch.float), size=(num_nodes, num_nodes)
     )
 
     sparse_eye = make_sparse_eye(num_nodes)
@@ -105,7 +105,7 @@ def make_sparse_eye(size):
     eye_idx = torch.arange(size)
     eye_idx = torch.stack([eye_idx, eye_idx], dim=1).t()
     vals = torch.ones(size)
-    eye = torch.sparse.FloatTensor(eye_idx, vals, torch.Size([size, size]))
+    eye = torch.sparse_coo_tensor(eye_idx, vals, size=(size, size))
     return eye
 
 

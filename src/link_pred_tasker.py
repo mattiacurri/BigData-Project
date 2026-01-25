@@ -6,7 +6,6 @@ Handles the preparation and sampling of data for link prediction tasks on tempor
 import torch
 
 import taskers_utils as tu
-import utils as u
 
 
 class Link_Pred_Tasker:
@@ -16,16 +15,14 @@ class Link_Pred_Tasker:
     makes the tasker independent of the dataset being used (as long as mentioned attributes have the same
     structure).
 
-    Based on the dataset it implements the get_sample function required by edge_cls_trainer.
-    This is a dictionary with:
-            - time_step: the time_step of the prediction
-            - hist_adj_list: the input adjacency matrices until t, each element of the list
-                                             is a sparse tensor with the current edges.
-            - nodes_feats_list: the input nodes for the GCN models, each element of the list is a tensor
-                                              two dimmensions: node_idx and node_feats
-            - label_adj: a sparse representation of the target edges. A dict with two keys: idx: M by 2
-                                     matrix with the indices of the nodes conforming each edge, vals: 1 if the node exists
-                                     , 0 if it doesn't
+    - time_step: the time_step of the prediction
+    - hist_adj_list: the input adjacency matrices until t, each element of the list
+                                        is a sparse tensor with the current edges.
+    - nodes_feats_list: the input nodes for the GCN models, each element of the list is a tensor
+                                        two dimmensions: node_idx and node_feats
+    - label_adj: a sparse representation of the target edges. A dict with two keys: idx: M by 2
+                                matrix with the indices of the nodes conforming each edge, vals: 1 if the node exists
+                                , 0 if it doesn't
     """
 
     def __init__(self, args, dataset):
@@ -41,9 +38,9 @@ class Link_Pred_Tasker:
         self.args = args
         self.num_classes = 2
 
-        # Use dataset features (BERT embeddings with temporal support)
+        # Use dataset features (BERT embeddings)
         self.feats_per_node = dataset.feats_per_node
-        print(f"Using temporal node features: {self.feats_per_node} features per node")
+        print(f"Using {self.feats_per_node} features per node")
 
         self.prepare_node_feats = self.build_prepare_node_feats(args, dataset)
 
@@ -116,7 +113,7 @@ class Link_Pred_Tasker:
         # Clamp negative timesteps to 0 - negative timesteps have no data anyway
         effective_timestep = max(0, timestep)
 
-        # Get full features (this still loads from disk)
+        # Get full features
         full_feats = self.data.get_temporal_node_features(effective_timestep)
 
         # Select only active nodes
@@ -143,7 +140,9 @@ class Link_Pred_Tasker:
         # Get the number of nodes that exist at this snapshot (for memory efficiency)
         # Use only active nodes to reduce memory footprint significantly
         num_active_nodes = self.data.get_num_nodes_at_snapshot(idx)
+        print(f"Snapshot {idx}: {num_active_nodes} active nodes")
         active_node_indices = self.data.get_node_indices_at_snapshot(idx)
+        print(f"Total nodes in dataset: {self.data.num_nodes}")
 
         # Create a mapping from original node IDs to compacted IDs
         # This allows us to work with smaller tensors
@@ -214,11 +213,24 @@ class Link_Pred_Tasker:
         else:
             existing_nodes = None
 
+        # if "all_edges" in kwargs.keys() and kwargs["all_edges"] == True:
+        #     # Use max_negative_test_edges if configured to limit memory usage
+        #     max_neg = getattr(self.args, "max_negative_test_edges", None)
+        #     non_existing_adj = tu.get_all_non_existing_edges(
+        #         adj=label_adj, tot_nodes=num_active_nodes, max_edges=max_neg
+        #     )
+        # else:
+        #     non_existing_adj = tu.get_non_existing_edges(
+        #         adj=label_adj,
+        #         number=label_adj["vals"].size(0) * neg_mult,
+        #         tot_nodes=num_active_nodes,
+        #         smart_sampling=self.args.smart_neg_sampling,
+        #         existing_nodes=existing_nodes,
+        #     )
+
         if "all_edges" in kwargs.keys() and kwargs["all_edges"] == True:
-            # Use max_negative_test_edges if configured to limit memory usage
-            max_neg = getattr(self.args, "max_negative_test_edges", None)
             non_existing_adj = tu.get_all_non_existing_edges(
-                adj=label_adj, tot_nodes=num_active_nodes, max_edges=max_neg
+                adj=label_adj, tot_nodes=num_active_nodes
             )
         else:
             non_existing_adj = tu.get_non_existing_edges(

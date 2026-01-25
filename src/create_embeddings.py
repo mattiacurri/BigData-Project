@@ -42,18 +42,18 @@ def build_adjacency_matrix(
     if snapshot_edge_indices.size(0) == 0:
         print(f"  Warning: No edges found for snapshot {snapshot}")
         # Return empty sparse matrix
-        return torch.sparse.FloatTensor(
+        return torch.sparse_coo_tensor(
             torch.zeros(2, 0, dtype=torch.long),
             torch.zeros(0, dtype=torch.float32),
-            torch.Size([num_nodes, num_nodes]),
+            size=(num_nodes, num_nodes),
         )
 
     # Extract source and target nodes (columns 0 and 1)
     edges_2d = snapshot_edge_indices[:, :2].long().t()  # Shape: [2, num_edges]
 
     # Create sparse adjacency matrix
-    adj_matrix = torch.sparse.FloatTensor(
-        edges_2d, snapshot_edge_weights, torch.Size([num_nodes, num_nodes])
+    adj_matrix = torch.sparse_coo_tensor(
+        edges_2d, snapshot_edge_weights, size=(num_nodes, num_nodes)
     ).coalesce()
 
     return adj_matrix
@@ -218,7 +218,7 @@ def main():
     # Load configuration
     print(f"Loading configuration from: {args.config}")
     with open(args.config, "r") as f:
-        config = yaml.load(f, Loader=yaml.FullLoader)
+        config = yaml.safe_load(f)
     config_args = u.Namespace(config)
 
     # Ensure task is set correctly

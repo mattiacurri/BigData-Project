@@ -5,8 +5,6 @@ Implements weighted cross-entropy loss for classification tasks with support for
 
 import torch
 
-import utils as u
-
 
 class Cross_Entropy(torch.nn.Module):
     """Cross-entropy loss module with dynamic weight scaling."""

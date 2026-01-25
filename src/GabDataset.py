@@ -40,8 +40,6 @@ class GabDataset:
         self.ecols = u.Namespace({"FromNodeId": 0, "ToNodeId": 1, "Weight": 2, "TimeStep": 3})
 
         # Load ALL snapshots to initialize the dataset structure
-        # Note: Edge filtering by timestamp happens in Link_Pred_Tasker.get_sample()
-        # This ensures the splitter can create proper time ranges
         print("Loading all snapshots for dataset initialization...")
         edges_df = self._load_all_snapshots()
 
@@ -81,10 +79,10 @@ class GabDataset:
 
         neg_sp_indices = sp_indices[:, neg_mask]
         neg_sp_values = sp_values[neg_mask]
-        neg_sp_edges = torch.sparse.LongTensor(
+        neg_sp_edges = torch.sparse_coo_tensor(
             neg_sp_indices,
             neg_sp_values,
-            torch.Size([num_nodes, num_nodes, int(self.max_time.item()) + 1]),
+            size=(num_nodes, num_nodes, int(self.max_time.item()) + 1),
         ).coalesce()
 
         pos_mask = sp_values == 1
@@ -92,10 +90,10 @@ class GabDataset:
         pos_sp_indices = sp_indices[:, pos_mask]
         pos_sp_values = sp_values[pos_mask]
 
-        pos_sp_edges = torch.sparse.LongTensor(
+        pos_sp_edges = torch.sparse_coo_tensor(
             pos_sp_indices,
             pos_sp_values,
-            torch.Size([num_nodes, num_nodes, int(self.max_time.item()) + 1]),
+            size=(num_nodes, num_nodes, int(self.max_time.item()) + 1),
         ).coalesce()
 
         # scale positive class to separate after adding
@@ -127,9 +125,6 @@ class GabDataset:
         self.num_nodes = num_nodes
         self.num_classes = 2
 
-        # Setup lazy loading of node features
-        print("\nSetting up temporal node features with lazy loading...")
-
         # Create post-to-snapshot mapping
         self.post_to_snapshot, self.post_to_user = self._create_post_mappings(args.gab_args)
 
@@ -149,7 +144,6 @@ class GabDataset:
         print(f"Number of nodes (total across all snapshots): {self.num_nodes}")
         print(f"Nodes per snapshot: {[len(nodes) for nodes in self.nodes_per_snapshot.values()]}")
         print(f"Post-to-snapshot mappings: {len(self.post_to_snapshot)}")
-        print(f"Temporal features will be computed on-demand per snapshot")
 
     def _initialize_node_id_map(self, edges: torch.Tensor) -> None:
         """Initialize node ID mapping from initial edges.
@@ -324,19 +318,19 @@ class GabDataset:
         neg_mask = sp_values == -1
         neg_sp_indices = sp_indices[:, neg_mask]
         neg_sp_values = sp_values[neg_mask]
-        neg_sp_edges = torch.sparse.LongTensor(
+        neg_sp_edges = torch.sparse_coo_tensor(
             neg_sp_indices,
             neg_sp_values,
-            torch.Size([num_nodes, num_nodes, int(self.max_time.item()) + 1]),
+            size=(num_nodes, num_nodes, int(self.max_time.item()) + 1),
         ).coalesce()
 
         pos_mask = sp_values == 1
         pos_sp_indices = sp_indices[:, pos_mask]
         pos_sp_values = sp_values[pos_mask]
-        pos_sp_edges = torch.sparse.LongTensor(
+        pos_sp_edges = torch.sparse_coo_tensor(
             pos_sp_indices,
             pos_sp_values,
-            torch.Size([num_nodes, num_nodes, int(self.max_time.item()) + 1]),
+            size=(num_nodes, num_nodes, int(self.max_time.item()) + 1),
         ).coalesce()
 
         pos_sp_edges *= 1000
@@ -440,10 +434,10 @@ class GabDataset:
         Returns:
             Number of nodes that have appeared up to this snapshot.
         """
-        if snapshot in self.nodes_per_snapshot:
-            return len(self.nodes_per_snapshot[snapshot])
+        # if snapshot in self.nodes_per_snapshot:
+        return len(self.nodes_per_snapshot[snapshot])
         # Fallback to total if snapshot not found
-        return self.num_nodes
+        # return self.num_nodes
 
     def get_node_indices_at_snapshot(self, snapshot: int) -> torch.Tensor:
         """Get indices of nodes that exist up to the given snapshot.
@@ -454,10 +448,10 @@ class GabDataset:
         Returns:
             Tensor of node indices that exist up to this snapshot.
         """
-        if snapshot in self.nodes_per_snapshot:
-            return torch.tensor(sorted(list(self.nodes_per_snapshot[snapshot])), dtype=torch.long)
-        # Fallback to all nodes
-        return torch.arange(self.num_nodes, dtype=torch.long)
+        # if snapshot in self.nodes_per_snapshot:
+        return torch.tensor(sorted(list(self.nodes_per_snapshot[snapshot])), dtype=torch.long)
+        # # Fallback to all nodes
+        # return torch.arange(self.num_nodes, dtype=torch.long)
 
     def cluster_negs_and_positives(self):  # , ratings):
         """Convert ratings to binary labels (+1/-1).
@@ -595,7 +589,6 @@ class GabDataset:
         """
         # node_feats is already a tensor with shape [num_nodes, embedding_dim]
         # Just ensure it's float for model compatibility
-        print(f"Preparing node features with shape: {node_feats.shape}")
         return node_feats.float()
 
     def edges_to_sp_dict(self, edges):

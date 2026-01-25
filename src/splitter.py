@@ -37,7 +37,6 @@ class splitter:
         )
 
         start = min_time_val + args.num_hist_steps  # -1 + args.adj_mat_time_window
-        print(start, end)
         end = args.train_proportion
 
         end = int(np.floor(max_time_val * end))
@@ -47,10 +46,9 @@ class splitter:
         start = end
         end = args.dev_proportion + args.train_proportion
         end = int(np.floor(max_time_val * end))
-        if args.task == "link_pred":
-            dev = data_split(tasker, start, end, test=True, all_edges=True)
-        else:
-            dev = data_split(tasker, start, end, test=True)
+
+        # all_edges: num_nodes * num_nodes - num_positive
+        dev = data_split(tasker, start, end, test=True, all_edges=True)
 
         dev = DataLoader(dev, num_workers=args.data_loading_params["num_workers"])
 
@@ -58,10 +56,7 @@ class splitter:
 
         # the +1 is because I assume that max_time exists in the dataset
         end = max_time_val + 1
-        if args.task == "link_pred":
-            test = data_split(tasker, start, end, test=True, all_edges=True)
-        else:
-            test = data_split(tasker, start, end, test=True)
+        test = data_split(tasker, start, end, test=True, all_edges=True)
 
         test = DataLoader(test, num_workers=args.data_loading_params["num_workers"])
 
@@ -117,19 +112,18 @@ class incremental_splitter:
         # Calculate valid time range (accounting for history)
         self.valid_start = min_time_val + args.num_hist_steps
         self.valid_end = max_time_val + 1
-        print(self.valid_start, self.valid_end)
 
         # Determine number of snapshots
         # Handle None, 'None', and numeric values
-        if hasattr(args, "num_snapshots") and args.num_snapshots is not None:
-            if isinstance(args.num_snapshots, str) and args.num_snapshots.lower() == "none":
-                # Default: each time step is a snapshot
-                self.num_snapshots = self.valid_end - self.valid_start
-            else:
-                self.num_snapshots = int(args.num_snapshots)
-        else:
-            # Default: each time step is a snapshot
-            self.num_snapshots = self.valid_end - self.valid_start
+        # if hasattr(args, "num_snapshots") and args.num_snapshots is not None:
+        #     if isinstance(args.num_snapshots, str) and args.num_snapshots.lower() == "none":
+        #         # Default: each time step is a snapshot
+        #         self.num_snapshots = self.valid_end - self.valid_start
+        #     else:
+        #         self.num_snapshots = int(args.num_snapshots)
+        # else:
+        #     # Default: each time step is a snapshot
+        self.num_snapshots = self.valid_end - self.valid_start
 
         # Create snapshot boundaries
         self.snapshot_boundaries = self._compute_snapshot_boundaries()
@@ -188,10 +182,8 @@ class incremental_splitter:
             train_snapshots.append(train_loader)
 
             # Testing version - uses all_edges for full evaluation
-            if self.args.task == "link_pred":
-                test_data = data_split(self.tasker, start, end, test=True, all_edges=True)
-            else:
-                test_data = data_split(self.tasker, start, end, test=True)
+            test_data = data_split(self.tasker, start, end, test=True, all_edges=True)
+
             test_loader = DataLoader(
                 test_data, batch_size=1, num_workers=self.args.data_loading_params["num_workers"]
             )
@@ -201,29 +193,29 @@ class incremental_splitter:
         self._test_snapshots = test_snapshots
         return train_snapshots
 
-    def get_all_snapshots(self) -> List[DataLoader]:
-        """Get all snapshot DataLoaders.
+    # def get_all_snapshots(self) -> List[DataLoader]:
+    #     """Get all snapshot DataLoaders.
 
-        Returns:
-            List of DataLoaders for all snapshots.
-        """
-        return self.snapshots
+    #     Returns:
+    #         List of DataLoaders for all snapshots.
+    #     """
+    #     return self.snapshots
 
-    def get_snapshot(self, idx: int) -> DataLoader:
-        """Get a specific snapshot by index.
+    # def get_snapshot(self, idx: int) -> DataLoader:
+    #     """Get a specific snapshot by index.
 
-        Args:
-            idx: Snapshot index.
+    #     Args:
+    #         idx: Snapshot index.
 
-        Returns:
-            DataLoader for the requested snapshot.
+    #     Returns:
+    #         DataLoader for the requested snapshot.
 
-        Raises:
-            IndexError: If idx is out of range.
-        """
-        if idx < 0 or idx >= len(self.snapshots):
-            raise IndexError(f"Snapshot index {idx} out of range [0, {len(self.snapshots)})")
-        return self.snapshots[idx]
+    #     Raises:
+    #         IndexError: If idx is out of range.
+    #     """
+    #     if idx < 0 or idx >= len(self.snapshots):
+    #         raise IndexError(f"Snapshot index {idx} out of range [0, {len(self.snapshots)})")
+    #     return self.snapshots[idx]
 
     def get_train_test_pairs(self) -> List[tuple]:
         """Get pairs of (train_snapshot, test_snapshot) for incremental training.
@@ -289,38 +281,38 @@ class data_split(Dataset):
         return t
 
 
-class static_data_split(Dataset):
-    """Dataset split for static graphs."""
+# class static_data_split(Dataset):
+#     """Dataset split for static graphs."""
 
-    def __init__(self, tasker, indexes, test):
-        """Initialize static data split.
+#     def __init__(self, tasker, indexes, test):
+#         """Initialize static data split.
 
-        Args:
-            tasker: Tasker object.
-            indexes: Node indices for this split.
-            test: Whether this is a test split.
-        """
-        self.tasker = tasker
-        self.indexes = indexes
-        self.test = test
-        self.adj_matrix = tasker.adj_matrix
+#         Args:
+#             tasker: Tasker object.
+#             indexes: Node indices for this split.
+#             test: Whether this is a test split.
+#         """
+#         self.tasker = tasker
+#         self.indexes = indexes
+#         self.test = test
+#         self.adj_matrix = tasker.adj_matrix
 
-    def __len__(self):
-        """Get the number of samples in this split.
+#     def __len__(self):
+#         """Get the number of samples in this split.
 
-        Returns:
-            int: Number of samples.
-        """
-        return len(self.indexes)
+#         Returns:
+#             int: Number of samples.
+#         """
+#         return len(self.indexes)
 
-    def __getitem__(self, idx):
-        """Get a sample from the dataset.
+#     def __getitem__(self, idx):
+#         """Get a sample from the dataset.
 
-        Args:
-            idx: Index of the sample.
+#         Args:
+#             idx: Index of the sample.
 
-        Returns:
-            Sample dict with input features and labels.
-        """
-        idx = self.indexes[idx]
-        return self.tasker.get_sample(idx, test=self.test)
+#         Returns:
+#             Sample dict with input features and labels.
+#         """
+#         idx = self.indexes[idx]
+#         return self.tasker.get_sample(idx, test=self.test)

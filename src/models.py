@@ -3,18 +3,14 @@
 Contains various sparse GCN variants including LSTM/GRU temporal models and classifiers.
 """
 
-from argparse import Namespace
-import math
-
 import torch
-import torch.nn as nn
-from torch.nn import functional as F
+from torch.nn import GRU, LSTM, Linear, Module, ParameterList, ReLU, Sequential
 from torch.nn.parameter import Parameter
 
 import utils as u
 
 
-class Sp_GCN(torch.nn.Module):
+class Sp_GCN(Module):
     """Sparse Graph Convolutional Network."""
 
     def __init__(self, args, activation):
@@ -28,7 +24,7 @@ class Sp_GCN(torch.nn.Module):
         self.activation = activation
         self.num_layers = args.num_layers
 
-        self.w_list = nn.ParameterList()
+        self.w_list = ParameterList()
         for i in range(self.num_layers):
             if i == 0:
                 w_i = Parameter(torch.Tensor(args.feats_per_node, args.layer_1_feats))
@@ -150,7 +146,7 @@ class Sp_GCN_LSTM_A(Sp_GCN):
             activation: Activation function.
         """
         super().__init__(args, activation)
-        self.rnn = nn.LSTM(
+        self.rnn = LSTM(
             input_size=args.layer_2_feats,
             hidden_size=args.lstm_l2_feats,
             num_layers=args.lstm_l2_layers,
@@ -194,7 +190,7 @@ class Sp_GCN_GRU_A(Sp_GCN_LSTM_A):
             activation: Activation function.
         """
         super().__init__(args, activation)
-        self.rnn = nn.GRU(
+        self.rnn = GRU(
             input_size=args.layer_2_feats,
             hidden_size=args.lstm_l2_feats,
             num_layers=args.lstm_l2_layers,
@@ -213,13 +209,13 @@ class Sp_GCN_LSTM_B(Sp_GCN):
         """
         super().__init__(args, activation)
         assert args.num_layers == 2, "GCN-LSTM and GCN-GRU requires 2 conv layers."
-        self.rnn_l1 = nn.LSTM(
+        self.rnn_l1 = LSTM(
             input_size=args.layer_1_feats,
             hidden_size=args.lstm_l1_feats,
             num_layers=args.lstm_l1_layers,
         )
 
-        self.rnn_l2 = nn.LSTM(
+        self.rnn_l2 = LSTM(
             input_size=args.layer_2_feats,
             hidden_size=args.lstm_l2_feats,
             num_layers=args.lstm_l2_layers,
@@ -273,13 +269,13 @@ class Sp_GCN_GRU_B(Sp_GCN_LSTM_B):
             activation: Activation function.
         """
         super().__init__(args, activation)
-        self.rnn_l1 = nn.GRU(
+        self.rnn_l1 = GRU(
             input_size=args.layer_1_feats,
             hidden_size=args.lstm_l1_feats,
             num_layers=args.lstm_l1_layers,
         )
 
-        self.rnn_l2 = nn.GRU(
+        self.rnn_l2 = GRU(
             input_size=args.layer_2_feats,
             hidden_size=args.lstm_l2_feats,
             num_layers=args.lstm_l2_layers,
@@ -298,28 +294,29 @@ class Classifier(torch.nn.Module):
             in_features: Number of input features. If None, computed from args.
         """
         super(Classifier, self).__init__()
-        activation = torch.nn.ReLU()
 
-        if in_features is not None:
-            num_feats = in_features
-        elif args.experiment_type in [
-            "sp_lstm_A_trainer",
-            "sp_lstm_B_trainer",
-            "sp_weighted_lstm_A",
-            "sp_weighted_lstm_B",
-        ]:
-            num_feats = args.gcn_parameters["lstm_l2_feats"] * 2
-        else:
-            num_feats = args.gcn_parameters["layer_2_feats"] * 2
-        print("CLS num_feats", num_feats)
+        # if in_features is not None:
+        # num_feats = in_features
+        # elif args.experiment_type in [
+        #     "sp_lstm_A_trainer",
+        #     "sp_lstm_B_trainer",
+        #     "sp_weighted_lstm_A",
+        #     "sp_weighted_lstm_B",
+        # ]:
+        #     num_feats = args.gcn_parameters["lstm_l2_feats"] * 2
+        # else:
+        #     num_feats = args.gcn_parameters["layer_2_feats"] * 2
+        print(f"in_features for classifier: {in_features}")
 
-        self.mlp = torch.nn.Sequential(
-            torch.nn.Linear(in_features=num_feats, out_features=args.gcn_parameters["cls_feats"]),
-            activation,
-            torch.nn.Linear(
-                in_features=args.gcn_parameters["cls_feats"], out_features=out_features
-            ),
+        self.mlp = Sequential(
+            Linear(in_features=in_features, out_features=args.gcn_parameters["cls_feats"]),
+            ReLU(),
+            Linear(in_features=args.gcn_parameters["cls_feats"], out_features=out_features),
         )
+
+        # print number of parameters
+        total_params = sum(p.numel() for p in self.mlp.parameters() if p.requires_grad)
+        print(f"MLP Classifier initialized with {total_params} trainable parameters.")
 
     def forward(self, x):
         """Forward pass through classifier MLP.

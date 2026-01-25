@@ -59,15 +59,6 @@ class Trainer:
         self.gcn_opt.zero_grad()
         self.classifier_opt.zero_grad()
 
-    def save_checkpoint(self, state, filename="checkpoint.pth.tar"):
-        """Save model checkpoint.
-
-        Args:
-                state: State dict to save.
-                filename: Checkpoint file path.
-        """
-        torch.save(state, filename)
-
     def load_checkpoint(self, filename, model):
         """Load model checkpoint.
 
@@ -79,19 +70,17 @@ class Trainer:
                 int: Epoch number from checkpoint, or 0 if not found.
         """
         if os.path.isfile(filename):
-            print("=> loading checkpoint '{}'".format(filename))
+            print(f"=> loading checkpoint '{filename}'")
             checkpoint = torch.load(filename)
             epoch = checkpoint["epoch"]
             self.gcn.load_state_dict(checkpoint["gcn_dict"])
             self.classifier.load_state_dict(checkpoint["classifier_dict"])
             self.gcn_opt.load_state_dict(checkpoint["gcn_optimizer"])
             self.classifier_opt.load_state_dict(checkpoint["classifier_optimizer"])
-            self.logger.log_str(
-                "=> loaded checkpoint '{}' (epoch {})".format(filename, checkpoint["epoch"])
-            )
+            self.logger.log_str(f"=> loaded checkpoint '{filename}' (epoch {checkpoint['epoch']})")
             return epoch
         else:
-            self.logger.log_str("=> no checkpoint found at '{}'".format(filename))
+            self.logger.log_str(f"=> no checkpoint found at '{filename}'")
             return 0
 
     def train(self):
@@ -423,7 +412,7 @@ class Trainer:
             # Save checkpoint after each phase
             log_dir = getattr(self.args, "log_dir", "log/")
             checkpoint_path = os.path.join(log_dir, f"checkpoint_phase_{phase_idx}.pth.tar")
-            self.save_checkpoint(
+            torch.save(
                 {
                     "phase": phase_idx,
                     "gcn_dict": self.gcn.state_dict(),
@@ -432,7 +421,7 @@ class Trainer:
                     "classifier_optimizer": self.classifier_opt.state_dict(),
                     "results": phase_results,
                 },
-                filename=checkpoint_path,
+                checkpoint_path,
             )
             print(f"Checkpoint saved: {checkpoint_path}")
             # Free memory: clear temporal features cache after each phase

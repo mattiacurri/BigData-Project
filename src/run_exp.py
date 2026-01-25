@@ -8,10 +8,12 @@ import random
 
 import numpy as np
 import torch
-import torch.distributed as dist
 
 # datasets
 import cross_entropy as ce
+
+# losses
+import GabDataset as ds
 
 # taskers
 import link_pred_tasker as lpt
@@ -21,7 +23,6 @@ import modeling.egcn_o as egcn_o
 # models
 import models as mls
 import splitter as sp
-import src.GabDataset as ds
 import trainer as tr
 import utils as u
 
@@ -122,24 +123,6 @@ def build_random_hyper_params(args):
     return args
 
 
-def build_dataset(args):
-    """Instantiate the dataset based on configuration.
-
-    Args:
-        args: Configuration namespace with dataset specifications.
-
-    Returns:
-        Dataset object for the specified data source.
-
-    Raises:
-        NotImplementedError: If the requested dataset is not yet supported.
-    """
-    if args.data == "gab":
-        return ds.GabDataset(args)
-    else:
-        raise NotImplementedError("Dataset not integrated yet")
-
-
 def build_gcn(args, tasker):
     """Build the GCN model based on configuration.
 
@@ -233,39 +216,27 @@ if __name__ == "__main__":
     args = build_random_hyper_params(args)
 
     # build the dataset
-    dataset = build_dataset(args)
+    dataset = ds.GabDataset(args)
     # build the tasker
     tasker = lpt.Link_Pred_Tasker(args, dataset)
 
-    # Check training mode: incremental or standard
-    # Handle boolean and string representations
-    incremental_mode = getattr(args, "incremental", False)
-    if isinstance(incremental_mode, str):
-        incremental_mode = incremental_mode.lower() in ["true", "yes", "1"]
+    # if args.incremental:
+    # print("\n" + "=" * 60)
+    # print("INCREMENTAL TRAINING MODE")
+    # print("=" * 60 + "\n")
 
-    if incremental_mode:
-        print("\n" + "=" * 60)
-        print("INCREMENTAL TRAINING MODE")
-        print("=" * 60 + "\n")
-
-        # Set default finetune_epochs if not specified
-        if not hasattr(args, "finetune_epochs") or args.finetune_epochs is None:
-            args.finetune_epochs = max(args.num_epochs // 2, 5)
-            print(f"Using default finetune_epochs: {args.finetune_epochs}")
-        elif isinstance(args.finetune_epochs, str):
-            if args.finetune_epochs.lower() == "none":
-                args.finetune_epochs = max(args.num_epochs // 2, 5)
-                print(f"Using default finetune_epochs: {args.finetune_epochs}")
-            else:
-                args.finetune_epochs = int(args.finetune_epochs)
-        else:
-            args.finetune_epochs = int(args.finetune_epochs)
-
-        # build the incremental splitter
-        splitter = sp.incremental_splitter(args, tasker)
+    # Set default finetune_epochs if not specified
+    if not hasattr(args, "finetune_epochs") or args.finetune_epochs is None:
+        args.finetune_epochs = max(args.num_epochs // 2, 5)
+        print(f"Using default finetune_epochs: {args.finetune_epochs}")
     else:
-        # build the standard splitter
-        splitter = sp.splitter(args, tasker)
+        args.finetune_epochs = int(args.finetune_epochs)
+
+    # build the incremental splitter
+    splitter = sp.incremental_splitter(args, tasker)
+    # else:
+    #     # build the standard splitter
+    #     splitter = sp.splitter(args, tasker)
 
     # build the models
     gcn = build_gcn(args, tasker)
@@ -284,7 +255,7 @@ if __name__ == "__main__":
         num_classes=tasker.num_classes,
     )
 
-    if incremental_mode:
-        trainer.train_incremental()
-    else:
-        trainer.train()
+    # if args.incremental:
+    trainer.train_incremental()
+    # else:
+    # trainer.train()
