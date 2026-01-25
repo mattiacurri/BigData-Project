@@ -166,7 +166,12 @@ class Trainer:
                 )
 
                 loss = self.comp_loss(predictions, s.label_sp["vals"])
-                print(f"\nLoss: {loss.item():.4f}")
+
+                if grad:
+                    print(f"[TRAIN] Loss: {loss.item()}")
+                else:
+                    print(f"[TEST] Loss: {loss.item()}")
+
                 if set_name in ["TEST", "VALID"] and self.args.task == "link_pred":
                     self.logger.log_minibatch(
                         predictions, s.label_sp["vals"], loss.detach(), adj=s.label_sp["idx"]

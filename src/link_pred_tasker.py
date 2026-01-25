@@ -190,9 +190,9 @@ class Link_Pred_Tasker:
         # Remap label_adj to compacted space
         label_adj = self._remap_adj_to_active_nodes(label_adj, node_mapping, num_active_nodes)
         if test:
-            neg_mult = self.args.negative_mult_test
+            negative_multiplier = self.args.negative_mult_test
         else:
-            neg_mult = self.args.negative_mult_training
+            negative_multiplier = self.args.negative_mult_training
 
         if self.args.smart_neg_sampling and existing_nodes:
             existing_nodes = torch.cat(existing_nodes)
@@ -206,7 +206,7 @@ class Link_Pred_Tasker:
         else:
             non_existing_adj = tu.get_non_existing_edges(
                 adj=label_adj,
-                number=label_adj["vals"].size(0) * neg_mult,
+                number=label_adj["vals"].size(0) * negative_multiplier,
                 tot_nodes=num_active_nodes,
                 smart_sampling=self.args.smart_neg_sampling,
                 existing_nodes=existing_nodes,
