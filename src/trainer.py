@@ -166,7 +166,7 @@ class Trainer:
                 )
 
                 loss = self.comp_loss(predictions, s.label_sp["vals"])
-                print(f"Loss: {loss.item():.4f}")
+                print(f"\nLoss: {loss.item():.4f}")
                 if set_name in ["TEST", "VALID"] and self.args.task == "link_pred":
                     self.logger.log_minibatch(
                         predictions, s.label_sp["vals"], loss.detach(), adj=s.label_sp["idx"]
@@ -208,17 +208,9 @@ class Trainer:
         """
         nodes_embs = self.gcn(hist_adj_list, hist_ndFeats_list, mask_list)
 
-        print(
-            f"[LOG] Predict: nodes_embs shape {nodes_embs.shape}, node_indices shape {node_indices.shape}"
-        )
-
         # !
         predict_batch_size = 100000
         gather_predictions = []
-
-        print(
-            f"[LOG] Predict: processing {node_indices.size(1)} pairs in batches of {predict_batch_size}"
-        )
 
         for i in tqdm.tqdm(
             range(1 + (node_indices.size(1) // predict_batch_size)), desc="Gathering predictions"

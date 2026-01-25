@@ -211,9 +211,6 @@ class Link_Pred_Tasker:
                 smart_sampling=self.args.smart_neg_sampling,
                 existing_nodes=existing_nodes,
             )
-            print(
-                f"[LOG] Training mode: {label_adj['vals'].size(0)} positives + {non_existing_adj['vals'].size(0)} negatives (mult={neg_mult}) = {label_adj['vals'].size(0) + non_existing_adj['vals'].size(0)} total pairs"
-            )
 
         label_adj["idx"] = torch.cat([label_adj["idx"], non_existing_adj["idx"]])
         label_adj["vals"] = torch.cat([label_adj["vals"], non_existing_adj["vals"]])
