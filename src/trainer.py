@@ -324,7 +324,10 @@ class Trainer:
                 self.args.device
             ).t()  # transposed to have same dimensions as scorer
 
-        label_sp = self.ignore_batch_dim(sample.label_sp)
+        label_sp = {
+            "idx": sample.label_sp["idx"][0],
+            "vals": sample.label_sp["vals"][0],
+        }
 
         if self.args.task in ["link_pred", "edge_cls"]:
             label_sp["idx"] = label_sp["idx"].to(self.args.device).t()
@@ -335,20 +338,6 @@ class Trainer:
         sample.label_sp = label_sp
 
         return sample
-
-    def ignore_batch_dim(self, adj):
-        """Remove batch dimension from adjacency dict.
-
-        Args:
-                adj: Adjacency dict with batch dimension.
-
-        Returns:
-                Adjacency dict without batch dimension.
-        """
-        if self.args.task in ["link_pred", "edge_cls"]:
-            adj["idx"] = adj["idx"][0]
-        adj["vals"] = adj["vals"][0]
-        return adj
 
     def save_node_embs_csv(self, nodes_embs, indexes, file_name):
         """Save node embeddings to CSV file.
