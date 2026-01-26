@@ -336,28 +336,6 @@ class Trainer:
 
         return sample
 
-    def prepare_static_sample(self, sample):
-        """Prepare a sample from static graph data.
-
-        Args:
-                sample: Raw sample from static graph.
-
-        Returns:
-                Processed sample.
-        """
-        sample = u.Namespace(sample)
-
-        sample.hist_adj_list = self.hist_adj_list
-
-        sample.hist_ndFeats_list = self.hist_ndFeats_list
-
-        label_sp = {}
-        label_sp["idx"] = [sample.idx]
-        label_sp["vals"] = sample.label
-        sample.label_sp = label_sp
-
-        return sample
-
     def ignore_batch_dim(self, adj):
         """Remove batch dimension from adjacency dict.
 
