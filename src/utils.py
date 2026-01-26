@@ -96,22 +96,6 @@ def random_param_value(param, param_min, param_max, type="int"):
         return param
 
 
-def create_parser():
-    """Create argument parser for experiment configuration.
-
-    Returns:
-        ArgumentParser object.
-    """
-    parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
-    parser.add_argument(
-        "--config_file",
-        default="experiments/parameters_example.yaml",
-        type=argparse.FileType(mode="r"),
-        help="optional, yaml file containing parameters to be used, overrides command line parameters",
-    )
-    return parser
-
-
 def parse_args(parser):
     """Parse command line arguments and YAML config file.
 

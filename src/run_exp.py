@@ -176,7 +176,13 @@ def build_classifier(args, tasker):
 
 
 if __name__ == "__main__":
-    parser = u.create_parser()
+    parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
+    parser.add_argument(
+        "--config_file",
+        default="experiments/parameters_example.yaml",
+        type=argparse.FileType(mode="r"),
+        help="optional, yaml file containing parameters to be used, overrides command line parameters",
+    )
     args = u.parse_args(parser)
 
     args.use_cuda = torch.cuda.is_available() and args.use_cuda
