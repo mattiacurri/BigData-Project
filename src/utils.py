@@ -40,23 +40,10 @@ def sparse_prepare_tensor(tensor, torch_size, ignore_batch_dim=True):
         Sparse tensor of specified size.
     """
     if ignore_batch_dim:
-        tensor = sp_ignore_batch_dim(tensor)
+        # remove batch dimension
+        tensor = {"idx": tensor["idx"][0], "vals": tensor["vals"][0]}
     tensor = make_sparse_tensor(tensor, tensor_type="float", torch_size=torch_size)
     return tensor
-
-
-def sp_ignore_batch_dim(tensor_dict):
-    """Remove batch dimension from sparse tensor.
-
-    Args:
-        tensor_dict: Tensor dict with 'idx' and 'vals'.
-
-    Returns:
-        Tensor dict with batch dimension removed.
-    """
-    tensor_dict["idx"] = tensor_dict["idx"][0]
-    tensor_dict["vals"] = tensor_dict["vals"][0]
-    return tensor_dict
 
 
 # def aggregate_by_time(time_vector, time_win_aggr):
