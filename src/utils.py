@@ -46,21 +46,6 @@ def sparse_prepare_tensor(tensor, torch_size, ignore_batch_dim=True):
     return tensor
 
 
-# def aggregate_by_time(time_vector, time_win_aggr):
-#     """Aggregate time steps by specified window size.
-
-#     Args:
-#         time_vector: Vector of timestamps.
-#         time_win_aggr: Time window for aggregation.
-
-#     Returns:
-#         Aggregated time vector.
-#     """
-#     time_vector = time_vector - time_vector.min()
-#     time_vector = time_vector // time_win_aggr
-#     return time_vector
-
-
 def reset_param(t):
     """Reset parameter values uniformly.
 
