@@ -102,6 +102,9 @@ class GabDataset:
 
         self.feats_per_node = 768  # BERT embedding dimension
 
+        # Cache for temporal node features (snapshot -> tensor)
+        self._temporal_features_cache: Dict[int, torch.Tensor] = {}
+
         print(f"Features per node: {self.feats_per_node}")
         print(f"Number of nodes (total across all snapshots): {self.num_nodes}")
         print(f"Nodes per snapshot: {[len(nodes) for nodes in self.nodes_per_snapshot.values()]}")
@@ -431,6 +434,8 @@ class GabDataset:
         with zeros for nodes that don't exist yet or don't have features.
         This is necessary because node IDs are contiguous across all snapshots.
 
+        Uses caching to avoid recomputing features for the same snapshot multiple times.
+
         Args:
             max_snapshot: Maximum snapshot index (inclusive) to use for features.
 
@@ -438,6 +443,10 @@ class GabDataset:
             Tensor of shape [self.num_nodes, embedding_dim] with temporal features.
             Nodes without features or that don't exist yet have zero vectors.
         """
+        # Check cache first
+        if max_snapshot in self._temporal_features_cache:
+            return self._temporal_features_cache[max_snapshot]
+
         # ??? For now we are doing in this way
         # train on snapshot 0 -> mean(emb_0)
         # test on snapshot 1 -> mean(emb_0)
@@ -480,9 +489,25 @@ class GabDataset:
             node_features[node_idx] = avg_embedding
             users_with_features += 1
 
-        # num_nodes_at_snapshot = len(nodes_at_snapshot)
+        # Cache the computed features
+        self._temporal_features_cache[max_snapshot] = node_features
 
         return node_features
+
+    def clear_temporal_cache(self) -> None:
+        """Clear the temporal features cache to free memory.
+
+        Should be called after each incremental training phase or when
+        memory needs to be reclaimed.
+        """
+        cache_size = len(self._temporal_features_cache)
+        if cache_size > 0:
+            print(f"Clearing temporal features cache ({cache_size} entries)...")
+            self._temporal_features_cache.clear()
+            # Force garbage collection
+            import gc
+
+            gc.collect()
 
     def edges_to_sp_dict(self, edges):
         """Convert edge list to sparse dictionary format.
