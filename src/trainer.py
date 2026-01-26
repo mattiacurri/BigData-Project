@@ -481,7 +481,15 @@ class Trainer:
             )
             phase_results["test_metrics"].append(eval_test)
 
-            print(f"Phase {phase_idx} - Epoch {e}: Train={eval_train:.4f}, Test={eval_test:.4f}")
+            # Log summary if it's a test epoch or if it aligns with train_epoch_log
+            should_log = True
+            if hasattr(self.args, "train_epoch_log"):
+                should_log = (e + 1) % self.args.train_epoch_log == 0
+
+            if should_log:
+                print(
+                    f"Phase {phase_idx} - Epoch {e}: Train={eval_train:.4f}, Test={eval_test:.4f}"
+                )
 
             # Track best performance
             if eval_test > best_eval_test:

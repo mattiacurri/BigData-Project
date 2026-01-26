@@ -249,13 +249,16 @@ class Logger:
         self.epoch = epoch
         self.set = set
         self.console_log = True
-        if hasattr(self, "args") and hasattr(self.args, "train_epoch_log"):
-            if self.set == "TRAIN" and (self.epoch + 1) % self.args.train_epoch_log != 0:
-                self.console_log = False
+        self.verbose = True
 
-        # Override console logging for validation/test
-        if self.set != "TRAIN":
-            self.console_log = True
+        is_train = self.set.startswith("TRAIN")
+        if hasattr(self, "args") and hasattr(self.args, "train_epoch_log"):
+            if is_train and (self.epoch + 1) % self.args.train_epoch_log != 0:
+                self.verbose = False
+
+        # Override verbose for validation/test
+        if not is_train:
+            self.verbose = True
 
         self.losses = []
         self.errors = []
@@ -299,8 +302,15 @@ class Logger:
             self.minibatch_log_interval = minibatch_log_interval
 
         # Styled epoch header
-        set_emoji = {"TRAIN": "🏋️", "VALID": "✅", "TEST": "🧪"}.get(set, "📊")
-        if self.console_log:
+        if self.set.startswith("TRAIN"):
+            set_emoji = "🏋️"
+        elif self.set.startswith("VALID"):
+            set_emoji = "✅"
+        elif self.set.startswith("TEST"):
+            set_emoji = "🧪"
+        else:
+            set_emoji = "📊"
+        if self.verbose:
             logging.info(f"\n{'=' * 60}")
             logging.info(f"{set_emoji} {set} EPOCH {epoch}")
             logging.info(f"{'=' * 60}")
@@ -364,7 +374,7 @@ class Logger:
             mb_MAP = self.calc_epoch_metric(self.batch_sizes, self.MAPs)
             partial_losses = torch.stack(self.losses)
 
-            if self.console_log:
+            if self.verbose:
                 logging.info(
                     f"  📦 Batch {self.minibatch_done}/{self.num_minibatches} | "
                     f"Loss: {partial_losses.mean():.4f} | "
@@ -441,9 +451,8 @@ class Logger:
         }
 
         table = format_metrics_table(self.set, self.epoch, main_metrics)
-        table = format_metrics_table(self.set, self.epoch, main_metrics)
 
-        if self.console_log:
+        if self.verbose:
             logging.info(f"\n{table}")
         else:
             # Log to file only if console is suppressed
@@ -461,8 +470,7 @@ class Logger:
             for cl, m in class_metrics.items()
         ]
         class_table = format_table(class_headers, class_rows, title="Per-Class Metrics")
-        class_table = format_table(class_headers, class_rows, title="Per-Class Metrics")
-        if self.console_log:
+        if self.verbose:
             logging.info(f"\n{class_table}")
         else:
             self.stdout_handler.setLevel(logging.WARNING)
@@ -475,7 +483,7 @@ class Logger:
                 self.conf_mat_tp_at_k[k], self.conf_mat_fn_at_k[k], self.conf_mat_fp_at_k[k]
             )
             msg = f"  📈 @{k}: P={k_precision:.4f} | R={k_recall:.4f} | F1={k_f1:.4f}"
-            if self.console_log:
+            if self.verbose:
                 logging.info(msg)
             else:
                 self.stdout_handler.setLevel(logging.WARNING)

@@ -4,6 +4,8 @@ This module orchestrates the training pipeline for GCN-based models on temporal 
 It handles model construction, hyperparameter randomization, dataset loading, and trainer initialization.
 """
 
+# parser
+import argparse
 import random
 
 import numpy as np
@@ -36,6 +38,7 @@ def random_param_value(param, param_min, param_max, type="int"):
     Returns:
             The parameter value (random if param is None, otherwise the param itself).
     """
+    # if None or 'none' is specified, sample a random value
     if str(param) is None or str(param).lower() == "none":
         if type == "int":
             return random.randrange(param_min, param_max + 1)
