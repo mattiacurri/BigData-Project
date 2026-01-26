@@ -10,9 +10,6 @@ import numpy as np
 import torch
 
 # datasets
-import cross_entropy as ce
-
-# losses
 import GabDataset as ds
 
 # taskers
@@ -218,7 +215,8 @@ if __name__ == "__main__":
     gcn = build_gcn(args, tasker)
     classifier = build_classifier(args, tasker)
     # build a loss
-    cross_entropy = ce.Cross_Entropy(args, dataset).to(args.device)
+    weights = torch.tensor(args.class_weights, dtype=torch.float).to(args.device)
+    cross_entropy = torch.nn.CrossEntropyLoss(weight=weights)
 
     # trainer
     trainer = tr.Trainer(

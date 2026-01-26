@@ -158,7 +158,11 @@ class Trainer:
 
         with context_manager:
             nodes_embs = None
-            pbar = tqdm.tqdm(split, desc=f"Epoch {epoch} - {set_name}", leave=True)
+            # Disable tqdm if console logging is suppressed for this epoch
+            disable_pbar = not getattr(self.logger, "console_log", True)
+            pbar = tqdm.tqdm(
+                split, desc=f"Epoch {epoch} - {set_name}", leave=True, disable=disable_pbar
+            )
             running_loss = 0.0
             batch_count = 0
 
@@ -177,7 +181,6 @@ class Trainer:
                 pbar.set_postfix(
                     {"loss": f"{running_loss:.4f}", "batch_loss": f"{loss.item():.4f}"}
                 )
-                print(set_name)
                 if (
                     set_name.startswith("TEST") or set_name.startswith("VALID")
                 ) and self.args.task == "link_pred":

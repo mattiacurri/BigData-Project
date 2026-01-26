@@ -27,6 +27,7 @@ target_class: 1  # Target class for metric calculation
 early_stop_patience: 10  # Reduced for fine-tuning phases
 
 eval_after_epochs: 10  # Start evaluating from first epoch in incremental mode
+train_epoch_log: 5 # Log to stdout every n epochs
 adj_mat_time_window: None
 
 num_hist_steps: 1

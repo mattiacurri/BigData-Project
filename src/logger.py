@@ -193,7 +193,9 @@ class Logger:
             stdout_handler = logging.StreamHandler(sys.stdout)
             stdout_handler.setLevel(logging.INFO)
             stdout_handler.setFormatter(console_formatter)
+            stdout_handler.setFormatter(console_formatter)
             root_logger.addHandler(stdout_handler)
+            self.stdout_handler = stdout_handler
 
             print(f"\n{'=' * 60}")
             print(f"📁 Log file: {self.log_name}")
@@ -239,10 +241,22 @@ class Logger:
             epoch: Epoch number.
             num_minibatches: Total number of minibatches in the epoch.
             set: Dataset split (TRAIN/VALID/TEST).
+            num_minibatches: Total number of minibatches in the epoch.
+            set: Dataset split (TRAIN/VALID/TEST).
             minibatch_log_interval: Optional override for logging interval.
+            console_log: Whether to log to console this epoch.
         """
         self.epoch = epoch
         self.set = set
+        self.console_log = True
+        if hasattr(self, "args") and hasattr(self.args, "train_epoch_log"):
+            if self.set == "TRAIN" and (self.epoch + 1) % self.args.train_epoch_log != 0:
+                self.console_log = False
+
+        # Override console logging for validation/test
+        if self.set != "TRAIN":
+            self.console_log = True
+
         self.losses = []
         self.errors = []
         self.MRRs = []
@@ -286,9 +300,10 @@ class Logger:
 
         # Styled epoch header
         set_emoji = {"TRAIN": "🏋️", "VALID": "✅", "TEST": "🧪"}.get(set, "📊")
-        logging.info(f"\n{'=' * 60}")
-        logging.info(f"{set_emoji} {set} EPOCH {epoch}")
-        logging.info(f"{'=' * 60}")
+        if self.console_log:
+            logging.info(f"\n{'=' * 60}")
+            logging.info(f"{set_emoji} {set} EPOCH {epoch}")
+            logging.info(f"{'=' * 60}")
 
         self.lasttime = time.monotonic()
         self.ep_time = self.lasttime
@@ -349,14 +364,14 @@ class Logger:
             mb_MAP = self.calc_epoch_metric(self.batch_sizes, self.MAPs)
             partial_losses = torch.stack(self.losses)
 
-            # Compact batch progress log
-            logging.info(
-                f"  📦 Batch {self.minibatch_done}/{self.num_minibatches} | "
-                f"Loss: {partial_losses.mean():.4f} | "
-                f"Err: {mb_error:.4f} | "
-                f"MRR: {mb_MRR:.4f} | "
-                f"MAP: {mb_MAP:.4f}"
-            )
+            if self.console_log:
+                logging.info(
+                    f"  📦 Batch {self.minibatch_done}/{self.num_minibatches} | "
+                    f"Loss: {partial_losses.mean():.4f} | "
+                    f"Err: {mb_error:.4f} | "
+                    f"MRR: {mb_MRR:.4f} | "
+                    f"MAP: {mb_MAP:.4f}"
+                )
 
         self.lasttime = time.monotonic()
 
@@ -426,7 +441,18 @@ class Logger:
         }
 
         table = format_metrics_table(self.set, self.epoch, main_metrics)
-        logging.info(f"\n{table}")
+        table = format_metrics_table(self.set, self.epoch, main_metrics)
+
+        if self.console_log:
+            logging.info(f"\n{table}")
+        else:
+            # Log to file only if console is suppressed
+            # We can force the message to be logged by temporarily ensuring handlers are set correctly
+            # But simpler approach: logging.info still goes to FileHandler.
+            # We need to mute StdoutHandler specifically.
+            self.stdout_handler.setLevel(logging.WARNING)
+            logging.info(f"\n{table}")
+            self.stdout_handler.setLevel(logging.INFO)
 
         # Per-class metrics table
         class_headers = ["Class", "Precision", "Recall", "F1"]
@@ -435,14 +461,26 @@ class Logger:
             for cl, m in class_metrics.items()
         ]
         class_table = format_table(class_headers, class_rows, title="Per-Class Metrics")
-        logging.info(f"\n{class_table}")
+        class_table = format_table(class_headers, class_rows, title="Per-Class Metrics")
+        if self.console_log:
+            logging.info(f"\n{class_table}")
+        else:
+            self.stdout_handler.setLevel(logging.WARNING)
+            logging.info(f"\n{class_table}")
+            self.stdout_handler.setLevel(logging.INFO)
 
         # @K metrics (compact)
         for k in self.eval_k_list:
             k_precision, k_recall, k_f1 = self.calc_microavg_eval_measures(
                 self.conf_mat_tp_at_k[k], self.conf_mat_fn_at_k[k], self.conf_mat_fp_at_k[k]
             )
-            logging.info(f"  📈 @{k}: P={k_precision:.4f} | R={k_recall:.4f} | F1={k_f1:.4f}")
+            msg = f"  📈 @{k}: P={k_precision:.4f} | R={k_recall:.4f} | F1={k_f1:.4f}"
+            if self.console_log:
+                logging.info(msg)
+            else:
+                self.stdout_handler.setLevel(logging.WARNING)
+                logging.info(msg)
+                self.stdout_handler.setLevel(logging.INFO)
 
         # =====================================================================
         # Save to JSON
