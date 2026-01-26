@@ -20,14 +20,19 @@ def get_sp_adj(edges, time, weighted, time_window):
         edges: Edge list with timestamps.
         time: Target time.
         weighted: Whether to include edge weights.
-        time_window: Size of time window.
+        time_window: Size of time window. If None, use all history from 0 to time.
 
     Returns:
         Dict with adjacency matrix in sparse format.
     """
     idx = edges["idx"]
     subset = idx[:, ECOLS.time] <= time
-    subset = subset * (idx[:, ECOLS.time] > (time - time_window))
+
+    # If time_window is specified, filter to only include recent edges
+    # Handle both Python None and YAML string "None"
+    if time_window is not None and time_window != "None":
+        subset = subset * (idx[:, ECOLS.time] > (time - time_window))
+
     idx = edges["idx"][subset][:, [ECOLS.source, ECOLS.target]]
     vals = edges["vals"][subset]
     out = torch.sparse_coo_tensor(idx.t(), vals).coalesce()

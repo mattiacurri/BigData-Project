@@ -171,8 +171,8 @@ class incremental_splitter:
             )
             train_snapshots.append(train_loader)
 
-            # Testing version - uses all_edges for full evaluation
-            test_data = data_split(self.tasker, start, end, test=True, all_edges=True)
+            # Testing version - uses all_edges for full evaluation (Memory destroying)
+            test_data = data_split(self.tasker, start, end, test=True)  # , all_edges=True)
 
             test_loader = DataLoader(
                 test_data, batch_size=1, num_workers=self.args.data_loading_params["num_workers"]

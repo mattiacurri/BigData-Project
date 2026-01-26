@@ -63,14 +63,6 @@ def build_random_hyper_params(args):
     args.learning_rate = random_param_value(
         args.learning_rate, args.learning_rate_min, args.learning_rate_max, type="logscale"
     )
-    # args.adj_mat_time_window = random_param_value(args.adj_mat_time_window, args.adj_mat_time_window_min, args.adj_mat_time_window_max, type='int')
-
-    if args.model == "gcn":
-        args.num_hist_steps = 0
-    else:
-        args.num_hist_steps = random_param_value(
-            args.num_hist_steps, args.num_hist_steps_min, args.num_hist_steps_max, type="int"
-        )
 
     args.gcn_parameters["feats_per_node"] = random_param_value(
         args.gcn_parameters["feats_per_node"],

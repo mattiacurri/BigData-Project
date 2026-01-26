@@ -158,7 +158,11 @@ class Trainer:
 
         with context_manager:
             nodes_embs = None
-            for s in tqdm.tqdm(split, desc=f"Epoch {epoch} - {set_name}"):
+            pbar = tqdm.tqdm(split, desc=f"Epoch {epoch} - {set_name}", leave=True)
+            running_loss = 0.0
+            batch_count = 0
+
+            for s in pbar:
                 s = self.prepare_sample(s)
 
                 predictions, nodes_embs = self.predict(
@@ -167,10 +171,12 @@ class Trainer:
 
                 loss = self.comp_loss(predictions, s.label_sp["vals"])
 
-                if grad:
-                    print(f"[TRAIN] Loss: {loss.item()}")
-                else:
-                    print(f"[TEST] Loss: {loss.item()}")
+                # Update running metrics for tqdm
+                batch_count += 1
+                running_loss = (running_loss * (batch_count - 1) + loss.item()) / batch_count
+                pbar.set_postfix(
+                    {"loss": f"{running_loss:.4f}", "batch_loss": f"{loss.item():.4f}"}
+                )
 
                 if set_name in ["TEST", "VALID"] and self.args.task == "link_pred":
                     self.logger.log_minibatch(
@@ -181,19 +187,25 @@ class Trainer:
 
                 if grad:
                     self.optim_step(loss)
+                    # Force cleanup during training to prevent memory accumulation
+                    del predictions, loss
+                    if nodes_embs is not None and not self.args.save_node_embeddings:
+                        del nodes_embs
+                        nodes_embs = None
+                    torch.cuda.empty_cache() if self.args.use_cuda else None
 
                 # Free memory for validation/test after each batch
                 if not grad:
-                    del predictions
+                    del predictions, loss
                     if nodes_embs is not None and not self.args.save_node_embeddings:
+                        del nodes_embs
                         nodes_embs = None
                     torch.cuda.empty_cache() if self.args.use_cuda else None
 
             # Explicit garbage collection after epoch
-            if not grad:
-                gc.collect()
-                if self.args.use_cuda:
-                    torch.cuda.empty_cache()
+            gc.collect()
+            if self.args.use_cuda:
+                torch.cuda.empty_cache()
 
         eval_measure = self.logger.log_epoch_done()
 
@@ -217,9 +229,7 @@ class Trainer:
         predict_batch_size = 100000
         gather_predictions = []
 
-        for i in tqdm.tqdm(
-            range(1 + (node_indices.size(1) // predict_batch_size)), desc="Gathering predictions"
-        ):
+        for i in range(1 + (node_indices.size(1) // predict_batch_size)):
             batch_indices = node_indices[:, i * predict_batch_size : (i + 1) * predict_batch_size]
             cls_input = self.gather_node_embs(nodes_embs, batch_indices)
             predictions = self.classifier(cls_input)
