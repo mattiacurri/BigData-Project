@@ -303,7 +303,9 @@ class Logger:
             **kwargs: Additional arguments (e.g., adj for link prediction).
         """
         probs = torch.softmax(predictions, dim=1)[:, 1]
-        if self.set in ["TEST", "VALID"] and self.args.task == "link_pred":
+        if (
+            self.set.startswith("TEST") or self.set.startswith("VALID")
+        ) and self.args.task == "link_pred":
             MRR = self.get_MRR(probs, true_classes, kwargs["adj"], do_softmax=False)
         else:
             MRR = torch.tensor([0.0])

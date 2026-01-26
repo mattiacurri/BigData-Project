@@ -214,6 +214,7 @@ cython_debug/
 
 .vscode/
 .github/
+.agent/
 notebook_outputs/
 log/
 scripts/

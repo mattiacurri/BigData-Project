@@ -4,37 +4,32 @@ gab_args:
   folder: ./data/
 
 use_cuda: True
-use_logfile: True
 
 model: egcn_h # egcn_h
 
 task: link_pred
 
-class_weights: [0.5, 0.5]
+class_weights: [0.05, 0.95]
 save_node_embeddings: False # TODO: set to True when we have stable training
 
 finetune_epochs: 2  # Number of epochs for fine-tuning phases (after initial training)
-num_epochs: 3  # Number of epochs for initial training
+num_epochs: 100  # Number of epochs for initial training
 steps_accum_gradients: 1
 learning_rate: 0.005
 learning_rate_min: 0.005
 learning_rate_max: 0.05
-negative_mult_training: 1
-negative_mult_test: 1
+negative_mult_training: 1 # num_negatives = 1 * num_positives
+negative_mult_test: 1 # num_negatives = 1 * num_positives
 #max_negative_test_edges: 1000000  # Limit negative edges in test to 1M for memory efficiency (None = all edges)
 smart_neg_sampling: True
 target_measure: MAP  # Measure to define the best epoch
 target_class: 1  # Target class for metric calculation
 early_stop_patience: 10  # Reduced for fine-tuning phases
 
-eval_after_epochs: 0  # Start evaluating from first epoch in incremental mode
-adj_mat_time_window: 1
+eval_after_epochs: 10  # Start evaluating from first epoch in incremental mode
+adj_mat_time_window: None
 
-# TODO: da capire
 num_hist_steps: 1
-# hyperparameters tuning ranges (not used for now)
-num_hist_steps_min: 1
-num_hist_steps_max: 2
 
 data_loading_params:
   batch_size: 1

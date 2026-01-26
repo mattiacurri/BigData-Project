@@ -177,8 +177,10 @@ class Trainer:
                 pbar.set_postfix(
                     {"loss": f"{running_loss:.4f}", "batch_loss": f"{loss.item():.4f}"}
                 )
-
-                if set_name in ["TEST", "VALID"] and self.args.task == "link_pred":
+                print(set_name)
+                if (
+                    set_name.startswith("TEST") or set_name.startswith("VALID")
+                ) and self.args.task == "link_pred":
                     self.logger.log_minibatch(
                         predictions, s.label_sp["vals"], loss.detach(), adj=s.label_sp["idx"]
                     )
