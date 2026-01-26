@@ -42,8 +42,12 @@ def sparse_prepare_tensor(tensor, torch_size, ignore_batch_dim=True):
     if ignore_batch_dim:
         # remove batch dimension
         tensor = {"idx": tensor["idx"][0], "vals": tensor["vals"][0]}
-    tensor = make_sparse_tensor(tensor, tensor_type="float", torch_size=torch_size)
-    return tensor
+
+    tensor_size = torch.Size(torch_size) if len(torch_size) == 2 else torch.Size(torch_size * 2)
+
+    return torch.sparse_coo_tensor(
+        tensor["idx"].t(), tensor["vals"].type(torch.float), tensor_size
+    )
 
 
 def reset_param(t):
@@ -54,29 +58,6 @@ def reset_param(t):
     """
     stdv = 2.0 / math.sqrt(t.size(0))
     t.data.uniform_(-stdv, stdv)
-
-
-def make_sparse_tensor(adj, tensor_type, torch_size):
-    """Create a sparse tensor from adjacency dict.
-
-    Args:
-        adj: Adjacency dict with 'idx' and 'vals'.
-        tensor_type: Type ('float' or 'long').
-        torch_size: Target size.
-
-    Returns:
-        Sparse tensor of specified type.
-    """
-    if len(torch_size) == 2:
-        tensor_size = torch.Size(torch_size)
-    elif len(torch_size) == 1:
-        tensor_size = torch.Size(torch_size * 2)
-
-    if tensor_type == "float":
-        # test = torch.sparse_coo_tensor(adj["idx"].t(), adj["vals"].type(torch.float), tensor_size)
-        return torch.sparse_coo_tensor(adj["idx"].t(), adj["vals"].type(torch.float), tensor_size)
-    elif tensor_type == "long":
-        return torch.sparse_coo_tensor(adj["idx"].t(), adj["vals"].type(torch.long), tensor_size)
 
 
 class Namespace(object):
