@@ -228,7 +228,9 @@ class Trainer:
         Returns:
                 tuple: (predictions, node embeddings)
         """
-        nodes_embs = self.gcn(hist_adj_list, hist_ndFeats_list, mask_list)
+        nodes_embs = self.gcn(
+            hist_adj_list, hist_ndFeats_list, mask_list
+        )  # Embedding produced by the GCN
 
         # !
         predict_batch_size = 100000
@@ -371,7 +373,12 @@ class Trainer:
         """
         # Get train/test pairs - training snapshots use normal negative sampling,
         # test snapshots use all_edges for comprehensive evaluation
-        train_test_pairs = self.splitter.get_train_test_pairs()
+        train_test_pairs = []
+        for i in range(len(self.splitter.snapshots) - 1):
+            # Train on snapshot i (training version), test on snapshot i+1 (test version)
+            train_test_pairs.append(
+                (self.splitter.snapshots[i], self.splitter._test_snapshots[i + 1])
+            )
         num_phases = len(train_test_pairs)
 
         if num_phases < 1:
@@ -384,18 +391,23 @@ class Trainer:
         all_results = []
 
         for phase_idx, (train_snapshot, test_snapshot) in enumerate(train_test_pairs):
+            # Construct phase description
+            # Training accumulates history, so we train on 0...phase_idx
+            # And test on phase_idx + 1
+            phase_desc = f"Snapshot 0-{phase_idx} -> {phase_idx + 1}"
+
             print(f"\n{'=' * 60}")
             if phase_idx == 0:
-                print(f"Phase {phase_idx + 1}: Initial Training")
+                print(f"{phase_desc} (Initial Training)")
             else:
-                print(f"Phase {phase_idx + 1}: Fine-tuning")
-            print(f"Train on snapshot {phase_idx} -> Test on snapshot {phase_idx + 1}")
+                print(f"{phase_desc} (Fine-tuning)")
             print(f"{'=' * 60}\n")
 
             phase_results = self._run_incremental_phase(
                 train_snapshot=train_snapshot,
                 test_snapshot=test_snapshot,
                 phase_idx=phase_idx,
+                phase_desc=phase_desc,
                 is_initial=(phase_idx == 0),
             )
 
@@ -407,6 +419,7 @@ class Trainer:
             torch.save(
                 {
                     "phase": phase_idx,
+                    "phase_desc": phase_desc,
                     "gcn_dict": self.gcn.state_dict(),
                     "classifier_dict": self.classifier.state_dict(),
                     "gcn_optimizer": self.gcn_opt.state_dict(),
@@ -432,6 +445,7 @@ class Trainer:
         train_snapshot: torch.utils.data.DataLoader,
         test_snapshot: torch.utils.data.DataLoader,
         phase_idx: int,
+        phase_desc: str,
         is_initial: bool,
     ) -> dict:
         """Run a single phase of incremental training.
@@ -440,6 +454,7 @@ class Trainer:
             train_snapshot: DataLoader for training data.
             test_snapshot: DataLoader for test data.
             phase_idx: Index of the current phase.
+            phase_desc: Description string for the phase.
             is_initial: Whether this is the initial training phase.
 
         Returns:
@@ -456,6 +471,7 @@ class Trainer:
 
         phase_results = {
             "phase_idx": phase_idx,
+            "phase_desc": phase_desc,
             "is_initial": is_initial,
             "num_epochs": num_epochs,
             "train_metrics": [],
@@ -469,16 +485,14 @@ class Trainer:
             self.gcn.train()
             self.classifier.train()
             eval_train, nodes_embs = self.run_epoch(
-                train_snapshot, e, f"TRAIN (Phase {phase_idx})", grad=True
+                train_snapshot, e, f"TRAIN [{phase_desc}]", grad=True
             )
             phase_results["train_metrics"].append(eval_train)
 
             # Testing
             self.gcn.eval()
             self.classifier.eval()
-            eval_test, _ = self.run_epoch(
-                test_snapshot, e, f"TEST (Phase {phase_idx})", grad=False
-            )
+            eval_test, _ = self.run_epoch(test_snapshot, e, f"TEST [{phase_desc}]", grad=False)
             phase_results["test_metrics"].append(eval_test)
 
             # Log summary if it's a test epoch or if it aligns with train_epoch_log
@@ -487,9 +501,7 @@ class Trainer:
                 should_log = (e + 1) % self.args.train_epoch_log == 0
 
             if should_log:
-                print(
-                    f"Phase {phase_idx} - Epoch {e}: Train={eval_train:.4f}, Test={eval_test:.4f}"
-                )
+                print(f"[{phase_desc}] Epoch {e}: Train={eval_train:.4f}, Test={eval_test:.4f}")
 
             # Track best performance
             if eval_test > best_eval_test:
@@ -508,7 +520,7 @@ class Trainer:
         phase_results["best_test_metric"] = best_eval_test
         phase_results["best_epoch"] = best_epoch
 
-        print(f"\nPhase {phase_idx} completed:")
+        print(f"\n[{phase_desc}] completed:")
         print(f"  Best test metric: {best_eval_test:.4f} at epoch {best_epoch}")
 
         return phase_results
@@ -525,7 +537,8 @@ class Trainer:
 
         for result in all_results:
             phase_type = "Initial Training" if result["is_initial"] else "Fine-tuning"
-            print(f"\nPhase {result['phase_idx']} ({phase_type}):")
+            phase_desc = result.get("phase_desc", f"Phase {result['phase_idx']}")
+            print(f"\n{phase_desc} ({phase_type}):")
             print(f"  Best Test Metric: {result['best_test_metric']:.4f}")
             print(f"  Best Epoch: {result['best_epoch']}")
             print(f"  Total Epochs: {len(result['train_metrics'])}")

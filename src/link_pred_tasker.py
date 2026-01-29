@@ -124,7 +124,7 @@ class Link_Pred_Tasker:
 
         # Get the number of nodes that exist at this snapshot (for memory efficiency)
         # Use only active nodes to reduce memory footprint significantly
-        num_active_nodes = self.dataset.get_num_nodes_at_snapshot(idx)
+        num_active_nodes = len(self.dataset.nodes_per_snapshot[idx])
         active_node_indices = self.dataset.get_node_indices_at_snapshot(idx)
 
         # Create a mapping from original node IDs to compacted IDs

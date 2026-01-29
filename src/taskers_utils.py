@@ -143,46 +143,6 @@ def get_all_non_existing_edges(adj, tot_nodes):
     return {"idx": edges, "vals": vals}
 
 
-def _sample_non_existing_edges_efficient(true_ids_set, tot_nodes, num_samples):
-    """Efficiently sample non-existing edges without generating all possibilities.
-
-    Args:
-        true_ids_set: Set of existing edge IDs.
-        tot_nodes: Total number of nodes.
-        num_samples: Number of negative edges to sample.
-
-    Returns:
-        Dict with sampled non-existing edges.
-    """
-    sampled = set()
-    attempts = 0
-    max_attempts = num_samples * 10  # Avoid infinite loop
-
-    while len(sampled) < num_samples and attempts < max_attempts:
-        # Sample batch of random edges
-        batch_size = min(num_samples * 2, 1000000)
-        src = np.random.randint(0, tot_nodes, batch_size)
-        dst = np.random.randint(0, tot_nodes, batch_size)
-
-        for s, d in zip(src, dst):
-            edge_id = s * tot_nodes + d
-            # Skip self-loops and existing edges
-            if s != d and edge_id not in true_ids_set and edge_id not in sampled:
-                sampled.add(edge_id)
-                if len(sampled) >= num_samples:
-                    break
-        attempts += batch_size
-
-    # Convert back to edge indices
-    sampled_ids = np.array(list(sampled))
-    src_nodes = sampled_ids // tot_nodes
-    dst_nodes = sampled_ids % tot_nodes
-
-    edges = torch.tensor(np.stack([src_nodes, dst_nodes], axis=1), dtype=torch.long)
-    vals = torch.zeros(edges.size(0), dtype=torch.long)
-    return {"idx": edges, "vals": vals}
-
-
 def get_non_existing_edges(adj, number, tot_nodes, smart_sampling, existing_nodes=None):
     """Sample non-existing edges for negative sampling.
 

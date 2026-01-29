@@ -110,24 +110,6 @@ class GabDataset:
         print(f"Nodes per snapshot: {[len(nodes) for nodes in self.nodes_per_snapshot.values()]}")
         print(f"Post-to-snapshot mappings: {len(self.post_to_snapshot)}")
 
-    def _initialize_node_id_map(self, edges: torch.Tensor) -> None:
-        """Initialize node ID mapping from initial edges.
-
-        Args:
-            edges: Initial edge tensor with mapped node IDs.
-        """
-        # Get unique original node IDs from edges
-        from_nodes = edges[:, self.ecols.FromNodeId].long()
-        to_nodes = edges[:, self.ecols.ToNodeId].long()
-        all_nodes = torch.cat([from_nodes, to_nodes]).unique()
-
-        # Create mapping
-        for idx, node_id in enumerate(all_nodes.tolist()):
-            self._node_id_map[node_id] = idx
-
-        self._next_node_id = len(all_nodes)
-        print(f"Initialized node ID map with {self._next_node_id} nodes")
-
     def _load_all_snapshots(self) -> pd.DataFrame:
         """Load edges from all snapshots.
 
@@ -212,93 +194,6 @@ class GabDataset:
 
         return snapshot_df
 
-    def add_snapshot_edges(self, snapshot_idx: int) -> None:
-        """Add edges from a new snapshot to the dataset.
-
-        This method loads edges for the specified snapshot and REBUILDS the dataset
-        with all loaded snapshots. This is simpler than trying to merge incremental edges.
-
-        Args:
-            snapshot_idx: Index of the snapshot to add.
-        """
-        if snapshot_idx in self.loaded_snapshots:
-            print(f"Snapshot {snapshot_idx} already loaded")
-            return
-
-        # Load the new snapshot edges (marks it as loaded)
-        new_edges_df = self._load_snapshot_edges(snapshot_idx)
-
-        if len(new_edges_df) == 0:
-            return
-
-        # Now rebuild the dataset with ALL loaded snapshots
-        # This is simpler than trying to incrementally merge
-        print(f"Rebuilding dataset with snapshots: {sorted(self.loaded_snapshots)}")
-        self._rebuild_dataset_with_loaded_snapshots()
-
-    def _rebuild_dataset_with_loaded_snapshots(self) -> None:
-        """Rebuild the dataset structure using all currently loaded snapshots.
-
-        This method re-processes all loaded edges and reconstructs the sparse
-        edge structure, node mappings, and other dataset attributes.
-        """
-        # Load all edges from loaded snapshots
-        all_edges_list = []
-        for snap_idx in sorted(self.loaded_snapshots):
-            snap_df = self._get_loaded_snapshot_edges(snap_idx)
-            all_edges_list.append(snap_df)
-
-        edges_df = pd.concat(all_edges_list, ignore_index=True)
-
-        # Convert to tensor
-        edges = torch.tensor(
-            edges_df[["FromNodeId", "ToNodeId", "Weight", "TimeStep"]].values, dtype=torch.float32
-        )
-        edges = self.make_contigous_node_ids(edges)
-
-        # Process edges (same as original __init__)
-        # timesteps = u.aggregate_by_time(edges[:, self.ecols.TimeStep], self.args_gab.aggr_time)
-        timesteps = edges[:, self.ecols.TimeStep]  # Usa timestamp originali senza aggregazione
-        self.max_time = timesteps.max()
-        self.min_time = timesteps.min()
-        # edges[:, self.ecols.TimeStep] = timesteps  # Non necessario se non modifichiamo
-
-        # Update nodes per snapshot
-        self._compute_nodes_per_snapshot(edges)
-
-        # Update total number of nodes
-        num_nodes = edges[:, [self.ecols.FromNodeId, self.ecols.ToNodeId]].unique().size(0)
-
-        # For link prediction, all loaded edges are positive (existing connections)
-        edges[:, self.ecols.Weight] = 1.0
-
-        # Create sparse representation for edges
-        sp_indices = (
-            edges[:, [self.ecols.FromNodeId, self.ecols.ToNodeId, self.ecols.TimeStep]].long().t()
-        )
-        sp_values = edges[:, self.ecols.Weight]
-
-        # Create labels: all existing edges are positive (1)
-        new_vals = torch.ones(sp_values.size(0), dtype=torch.long)
-        # [from, to, time, label]
-        indices_labels = torch.cat([sp_indices.t(), new_vals.view(-1, 1)], dim=1)
-
-        vals = torch.ones(sp_values.size(0), dtype=torch.float32)
-
-        # Update dataset attributes
-        self.edges = {"idx": indices_labels, "vals": vals}
-        self.num_nodes = num_nodes
-
-        # Update user ID mappings
-        unique_users = set(edges_df["FromNodeId"].unique()) | set(edges_df["ToNodeId"].unique())
-        original_user_ids = sorted(list(unique_users))
-        self.user_id_to_node_idx = {user_id: idx for idx, user_id in enumerate(original_user_ids)}
-        self.node_idx_to_user_id = {
-            idx: user_id for user_id, idx in self.user_id_to_node_idx.items()
-        }
-
-        print(f"Rebuilt dataset: {self.num_nodes} nodes, {self.edges['idx'].size(0)} edges")
-
     def _get_loaded_snapshot_edges(self, snapshot_idx: int) -> pd.DataFrame:
         """Reload edges from a previously loaded snapshot.
 
@@ -363,20 +258,6 @@ class GabDataset:
         print(f"\nNodes per snapshot (cumulative):")
         for snapshot in sorted(self.nodes_per_snapshot.keys()):
             print(f"  Snapshot {snapshot}: {len(self.nodes_per_snapshot[snapshot])} nodes")
-
-    def get_num_nodes_at_snapshot(self, snapshot: int) -> int:
-        """Get the number of nodes that exist up to the given snapshot.
-
-        Args:
-            snapshot: Snapshot index.
-
-        Returns:
-            Number of nodes that have appeared up to this snapshot.
-        """
-        # if snapshot in self.nodes_per_snapshot:
-        return len(self.nodes_per_snapshot[snapshot])
-        # Fallback to total if snapshot not found
-        # return self.num_nodes
 
     def get_node_indices_at_snapshot(self, snapshot: int) -> torch.Tensor:
         """Get indices of nodes that exist up to the given snapshot.
@@ -508,33 +389,6 @@ class GabDataset:
             import gc
 
             gc.collect()
-
-    def edges_to_sp_dict(self, edges):
-        """Convert edge list to sparse dictionary format.
-
-        Args:
-            edges: Edge list with source, target, weight, time.
-
-        Returns:
-            Dict with 'idx' (edge indices) and 'vals' (weights).
-        """
-        idx = edges[:, [self.ecols.FromNodeId, self.ecols.ToNodeId, self.ecols.TimeStep]]
-
-        vals = edges[:, self.ecols.Weight]
-        return {"idx": idx, "vals": vals}
-
-    def get_num_nodes(self, edges):
-        """Get the number of unique nodes in the edge list.
-
-        Args:
-            edges: Edge list.
-
-        Returns:
-            int: Number of nodes.
-        """
-        all_ids = edges[:, [self.ecols.FromNodeId, self.ecols.ToNodeId]]
-        num_nodes = all_ids.max() + 1
-        return num_nodes
 
     def _load_edg_file(self, file_path):
         """Load edges from .edg file (tab-separated source-target pairs).

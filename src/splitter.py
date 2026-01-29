@@ -119,12 +119,6 @@ class incremental_splitter:
         self.snapshot_boundaries = self._compute_snapshot_boundaries()
         self.snapshots = self._create_snapshots()
 
-        # print(f"\nIncremental Splitter initialized:")
-        # print(f"  Time range: [{self.valid_start}, {self.valid_end})")
-        # print(f"  Number of snapshots: {len(self.snapshots)}")
-        # for i, (start, end) in enumerate(self.snapshot_boundaries):
-        #     print(f"    Snapshot {i}: time [{start}, {end}), size={end - start}")
-
     def _compute_snapshot_boundaries(self) -> List[tuple]:
         """Compute the time boundaries for each snapshot.
 
@@ -183,20 +177,6 @@ class incremental_splitter:
         self._test_snapshots = test_snapshots
         return train_snapshots
 
-    def get_train_test_pairs(self) -> List[tuple]:
-        """Get pairs of (train_snapshot, test_snapshot) for incremental training.
-
-        Returns:
-            List of (train_loader, test_loader) tuples.
-            - train_loader uses normal negative sampling (test=False)
-            - test_loader uses all_edges for comprehensive evaluation
-        """
-        pairs = []
-        for i in range(len(self.snapshots) - 1):
-            # Train on snapshot i (training version), test on snapshot i+1 (test version)
-            pairs.append((self.snapshots[i], self._test_snapshots[i + 1]))
-        return pairs
-
     def __len__(self) -> int:
         """Get the number of snapshots.
 
@@ -245,40 +225,3 @@ class data_split(Dataset):
         idx = self.start + idx
         t = self.tasker.get_sample(idx, test=self.test, **self.kwargs)
         return t
-
-
-# class static_data_split(Dataset):
-#     """Dataset split for static graphs."""
-
-#     def __init__(self, tasker, indexes, test):
-#         """Initialize static data split.
-
-#         Args:
-#             tasker: Tasker object.
-#             indexes: Node indices for this split.
-#             test: Whether this is a test split.
-#         """
-#         self.tasker = tasker
-#         self.indexes = indexes
-#         self.test = test
-#         self.adj_matrix = tasker.adj_matrix
-
-#     def __len__(self):
-#         """Get the number of samples in this split.
-
-#         Returns:
-#             int: Number of samples.
-#         """
-#         return len(self.indexes)
-
-#     def __getitem__(self, idx):
-#         """Get a sample from the dataset.
-
-#         Args:
-#             idx: Index of the sample.
-
-#         Returns:
-#             Sample dict with input features and labels.
-#         """
-#         idx = self.indexes[idx]
-#         return self.tasker.get_sample(idx, test=self.test)

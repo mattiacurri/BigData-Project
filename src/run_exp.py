@@ -64,12 +64,6 @@ def build_random_hyper_params(args):
         args.learning_rate, args.learning_rate_min, args.learning_rate_max, type="logscale"
     )
 
-    args.gcn_parameters["feats_per_node"] = random_param_value(
-        args.gcn_parameters["feats_per_node"],
-        args.gcn_parameters["feats_per_node_min"],
-        args.gcn_parameters["feats_per_node_max"],
-        type="int",
-    )
     args.gcn_parameters["layer_1_feats"] = random_param_value(
         args.gcn_parameters["layer_1_feats"],
         args.gcn_parameters["layer_1_feats_min"],
@@ -218,7 +212,10 @@ if __name__ == "__main__":
         args.finetune_epochs = int(args.finetune_epochs)
 
     # build the incremental splitter
-    splitter = sp.incremental_splitter(args, tasker)
+    if args.incremental:
+        splitter = sp.incremental_splitter(args, tasker)
+    else:
+        splitter = sp.splitter(args, tasker)
 
     # build the models
     gcn = build_gcn(args, tasker)
@@ -237,4 +234,7 @@ if __name__ == "__main__":
         dataset=dataset,
     )
 
-    trainer.train_incremental()
+    if args.incremental:
+        trainer.train_incremental()
+    else:
+        trainer.train()

@@ -12,7 +12,7 @@ filename = sys.argv[-1]  # log filename
 cl_to_plot_id = 1  # Target class
 
 simulate_early_stop = 0  # Early stop patience
-eval_k = 1000  # to compute metrics @K (for instance precision@1000)
+# eval_k = 1000  # to compute metrics @K (for instance precision@1000)
 print_params = True  # Print the parameters of each simulation
 ##### End parameters ######
 
@@ -58,12 +58,12 @@ last_test_ep["F1"] = "-"
 last_test_ep["AVG-precision"] = "-"
 last_test_ep["AVG-recall"] = "-"
 last_test_ep["AVG-F1"] = "-"
-last_test_ep["precision@" + str(eval_k)] = "-"
-last_test_ep["recall@" + str(eval_k)] = "-"
-last_test_ep["F1@" + str(eval_k)] = "-"
-last_test_ep["AVG-precision@" + str(eval_k)] = "-"
-last_test_ep["AVG-recall@" + str(eval_k)] = "-"
-last_test_ep["AVG-F1@" + str(eval_k)] = "-"
+# last_test_ep["precision@" + str(eval_k)] = "-"
+# last_test_ep["recall@" + str(eval_k)] = "-"
+# last_test_ep["F1@" + str(eval_k)] = "-"
+# last_test_ep["AVG-precision@" + str(eval_k)] = "-"
+# last_test_ep["AVG-recall@" + str(eval_k)] = "-"
+# last_test_ep["AVG-F1@" + str(eval_k)] = "-"
 last_test_ep["MRR"] = "-"
 last_test_ep["MAP"] = "-"
 last_test_ep["best_epoch"] = -1
@@ -179,14 +179,14 @@ with open(filename) as f:
                 last_test_ep["AVG-recall"] = rec[set][epoch]
                 last_test_ep["AVG-F1"] = f1[set][epoch]
 
-        elif "measures@" + str(eval_k) + " microavg" in line:
-            prec_at_k[set][epoch] = float(line.split("precision ")[1].split(" ")[0])
-            rec_at_k[set][epoch] = float(line.split("recall ")[1].split(" ")[0])
-            f1_at_k[set][epoch] = float(line.split("f1 ")[1].split(" ")[0])
-            if set == "TEST":
-                last_test_ep["AVG-precision@" + str(eval_k)] = prec_at_k[set][epoch]
-                last_test_ep["AVG-recall@" + str(eval_k)] = rec_at_k[set][epoch]
-                last_test_ep["AVG-F1@" + str(eval_k)] = f1_at_k[set][epoch]
+        # elif "measures@" + str(eval_k) + " microavg" in line:
+        #     prec_at_k[set][epoch] = float(line.split("precision ")[1].split(" ")[0])
+        #     rec_at_k[set][epoch] = float(line.split("recall ")[1].split(" ")[0])
+        #     f1_at_k[set][epoch] = float(line.split("f1 ")[1].split(" ")[0])
+        #     if set == "TEST":
+        #         last_test_ep["AVG-precision@" + str(eval_k)] = prec_at_k[set][epoch]
+        #         last_test_ep["AVG-recall@" + str(eval_k)] = rec_at_k[set][epoch]
+        #         last_test_ep["AVG-F1@" + str(eval_k)] = f1_at_k[set][epoch]
         elif "measures for class " in line:
             cl = int(line.split("class ")[1].split(" ")[0])
             if cl not in prec_cl[set]:
@@ -233,10 +233,10 @@ with open(filename) as f:
                 if v > best_measure[set]:
                     best_measure[set] = v
                     best_epoch[set] = epoch
-            if set == "TEST":
-                last_test_ep["precision@" + str(eval_k)] = prec_at_k_cl[set][cl][epoch]
-                last_test_ep["recall@" + str(eval_k)] = rec_at_k_cl[set][cl][epoch]
-                last_test_ep["F1@" + str(eval_k)] = f1_at_k_cl[set][cl][epoch]
+            # if set == "TEST":
+            #     last_test_ep["precision@" + str(eval_k)] = prec_at_k_cl[set][cl][epoch]
+            #     last_test_ep["recall@" + str(eval_k)] = rec_at_k_cl[set][cl][epoch]
+            #     last_test_ep["F1@" + str(eval_k)] = f1_at_k_cl[set][cl][epoch]
 
 
 if best_epoch["TEST"] < 0 and best_epoch["VALID"] < 0 or last_test_ep["best_epoch"] < 1:
@@ -303,9 +303,9 @@ try:
                 f1_at_k_cl["TEST"][cl_to_plot_id][best_ep],
             )
         )
-        res_map["precision@" + str(eval_k)] = prec_at_k_cl["TEST"][cl_to_plot_id][best_ep]
-        res_map["recall@" + str(eval_k)] = rec_at_k_cl["TEST"][cl_to_plot_id][best_ep]
-        res_map["F1@" + str(eval_k)] = f1_at_k_cl["TEST"][cl_to_plot_id][best_ep]
+        # res_map["precision@" + str(eval_k)] = prec_at_k_cl["TEST"][cl_to_plot_id][best_ep]
+        # res_map["recall@" + str(eval_k)] = rec_at_k_cl["TEST"][cl_to_plot_id][best_ep]
+        # res_map["F1@" + str(eval_k)] = f1_at_k_cl["TEST"][cl_to_plot_id][best_ep]
 
         print(
             "Values at best Valid Epoch (%d) micro-AVG@%d: TEST Precision %0.4f - Recall %0.4f - F1 %0.4f"
@@ -317,17 +317,18 @@ try:
                 f1_at_k["TEST"][best_ep],
             )
         )
-        res_map["AVG-precision@" + str(eval_k)] = prec_at_k["TEST"][best_ep]
-        res_map["AVG-recall@" + str(eval_k)] = rec_at_k["TEST"][best_ep]
-        res_map["AVG-F1@" + str(eval_k)] = f1_at_k["TEST"][best_ep]
+        # res_map["AVG-precision@" + str(eval_k)] = prec_at_k["TEST"][best_ep]
+        # res_map["AVG-recall@" + str(eval_k)] = rec_at_k["TEST"][best_ep]
+        # res_map["AVG-F1@" + str(eval_k)] = f1_at_k["TEST"][best_ep]
 
     except:
-        res_map["precision@" + str(eval_k)] = last_test_ep["precision@" + str(eval_k)]
-        res_map["recall@" + str(eval_k)] = last_test_ep["recall@" + str(eval_k)]
-        res_map["F1@" + str(eval_k)] = last_test_ep["F1@" + str(eval_k)]
-        res_map["AVG-precision@" + str(eval_k)] = last_test_ep["AVG-precision@" + str(eval_k)]
-        res_map["AVG-recall@" + str(eval_k)] = last_test_ep["AVG-recall@" + str(eval_k)]
-        res_map["AVG-F1@" + str(eval_k)] = last_test_ep["AVG-F1@" + str(eval_k)]
+        print("WARNING: last epoch not finished, use the previous one.")
+        # res_map["precision@" + str(eval_k)] = last_test_ep["precision@" + str(eval_k)]
+        # res_map["recall@" + str(eval_k)] = last_test_ep["recall@" + str(eval_k)]
+        # res_map["F1@" + str(eval_k)] = last_test_ep["F1@" + str(eval_k)]
+        # res_map["AVG-precision@" + str(eval_k)] = last_test_ep["AVG-precision@" + str(eval_k)]
+        # res_map["AVG-recall@" + str(eval_k)] = last_test_ep["AVG-recall@" + str(eval_k)]
+        # res_map["AVG-F1@" + str(eval_k)] = last_test_ep["AVG-F1@" + str(eval_k)]
 
     try:
         print(

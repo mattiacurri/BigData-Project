@@ -121,12 +121,6 @@ def parse_args(parser):
     #     args.num_hist_steps, args.num_hist_steps_min, args.num_hist_steps_max, type="int"
     # )
 
-    args.gcn_parameters["feats_per_node"] = random_param_value(
-        args.gcn_parameters["feats_per_node"],
-        args.gcn_parameters["feats_per_node_min"],
-        args.gcn_parameters["feats_per_node_max"],
-        type="int",
-    )
     args.gcn_parameters["layer_1_feats"] = random_param_value(
         args.gcn_parameters["layer_1_feats"],
         args.gcn_parameters["layer_1_feats_min"],

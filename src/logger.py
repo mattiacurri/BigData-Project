@@ -20,10 +20,6 @@ import torch
 
 import utils
 
-# =============================================================================
-# Custom Formatters
-# =============================================================================
-
 
 class ColoredFormatter(logging.Formatter):
     """Custom formatter with colors for console output."""
@@ -63,11 +59,6 @@ class PlainFormatter(logging.Formatter):
     """Plain formatter for file output (no colors)."""
 
     pass
-
-
-# =============================================================================
-# ASCII Table Helpers
-# =============================================================================
 
 
 def format_table(headers, rows, title=None):
@@ -133,11 +124,6 @@ def format_metrics_table(set_name, epoch, metrics_dict):
     values = [f"{v:.4f}" if isinstance(v, float) else str(v) for v in metrics_dict.values()]
 
     return format_table(headers, [values], title=f"{set_name} Epoch {epoch}")
-
-
-# =============================================================================
-# Logger Class
-# =============================================================================
 
 
 class Logger:
@@ -216,14 +202,6 @@ class Logger:
         self.eval_k_list = [10, 100, 1000]
         self.args = args
 
-    def get_log_file_name(self):
-        """Get the path to the log file.
-
-        Returns:
-            str: Path to the log file.
-        """
-        return self.log_name
-
     def log_str(self, message, level="info"):
         """Log a string message with specified level.
 
@@ -301,19 +279,8 @@ class Logger:
         if minibatch_log_interval is not None:
             self.minibatch_log_interval = minibatch_log_interval
 
-        # Styled epoch header
-        if self.set.startswith("TRAIN"):
-            set_emoji = "🏋️"
-        elif self.set.startswith("VALID"):
-            set_emoji = "✅"
-        elif self.set.startswith("TEST"):
-            set_emoji = "🧪"
-        else:
-            set_emoji = "📊"
         if self.verbose:
-            logging.info(f"\n{'=' * 60}")
-            logging.info(f"{set_emoji} {set} EPOCH {epoch}")
-            logging.info(f"{'=' * 60}")
+            logging.info(f"{set} EPOCH {epoch}")
 
         self.lasttime = time.monotonic()
         self.ep_time = self.lasttime
@@ -328,9 +295,7 @@ class Logger:
             **kwargs: Additional arguments (e.g., adj for link prediction).
         """
         probs = torch.softmax(predictions, dim=1)[:, 1]
-        if (
-            self.set.startswith("TEST") or self.set.startswith("VALID")
-        ) and self.args.task == "link_pred":
+        if self.set.startswith("TEST") or self.set.startswith("VALID"):
             MRR = self.get_MRR(probs, true_classes, kwargs["adj"], do_softmax=False)
         else:
             MRR = torch.tensor([0.0])
@@ -436,9 +401,7 @@ class Logger:
                 else:
                     eval_measure = cl_f1
 
-        # =====================================================================
         # ASCII Table Summary
-        # =====================================================================
         main_metrics = {
             "Loss": f"{mean_loss:.4f}",
             "Error": f"{epoch_error:.4f}",
@@ -477,22 +440,7 @@ class Logger:
             logging.info(f"\n{class_table}")
             self.stdout_handler.setLevel(logging.INFO)
 
-        # @K metrics (compact)
-        for k in self.eval_k_list:
-            k_precision, k_recall, k_f1 = self.calc_microavg_eval_measures(
-                self.conf_mat_tp_at_k[k], self.conf_mat_fn_at_k[k], self.conf_mat_fp_at_k[k]
-            )
-            msg = f"  📈 @{k}: P={k_precision:.4f} | R={k_recall:.4f} | F1={k_f1:.4f}"
-            if self.verbose:
-                logging.info(msg)
-            else:
-                self.stdout_handler.setLevel(logging.WARNING)
-                logging.info(msg)
-                self.stdout_handler.setLevel(logging.INFO)
-
-        # =====================================================================
         # Save to JSON
-        # =====================================================================
         epoch_metrics = {
             "epoch": self.epoch,
             "set": self.set,
@@ -538,7 +486,12 @@ class Logger:
         if do_softmax:
             probs = torch.softmax(predictions, dim=1)[:, 1]
         else:
+            print("HERE I AM")
             probs = predictions
+
+        print(len(probs))
+        print(probs)
+        print(probs[0], probs[1], probs[2], probs[3])
 
         probs = probs.cpu().numpy()
         true_classes = true_classes.cpu().numpy()
