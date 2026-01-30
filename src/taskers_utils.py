@@ -4,13 +4,14 @@ Provides functions for graph manipulation, feature generation, and edge sampling
 """
 
 import time
+from types import SimpleNamespace
 
 import numpy as np
 import torch
 
 import utils as u
 
-ECOLS = u.Namespace({"source": 0, "target": 1, "time": 2})
+ECOLS = SimpleNamespace(source=0, target=1, time=2)
 
 
 def get_sp_adj(edges, time, time_window):

@@ -7,6 +7,7 @@ It handles model construction, hyperparameter randomization, dataset loading, an
 # parser
 import argparse
 import random
+from types import SimpleNamespace
 
 import numpy as np
 import torch
@@ -71,7 +72,7 @@ if __name__ == "__main__":
 
     # build the model
     # GCN
-    gcn_args = u.Namespace(args.gcn_parameters)
+    gcn_args = SimpleNamespace(**args.gcn_parameters)
     gcn_args.feats_per_node = dataset.feats_per_node
 
     if args.model == "egcn_h":

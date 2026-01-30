@@ -12,6 +12,7 @@ import os
 import pprint
 import sys
 import time
+from types import SimpleNamespace
 
 import numpy as np
 from scipy.sparse import coo_matrix
@@ -488,9 +489,8 @@ class Logger:
         else:
             probs = predictions
 
-        print(len(probs))
+        print(f"Len probs: {len(probs)}")
         print(probs)
-        print(probs[0], probs[1], probs[2], probs[3])
 
         probs = probs.cpu().numpy()
         true_classes = true_classes.cpu().numpy()
@@ -567,7 +567,7 @@ class Logger:
         failures = (predicted_classes != true_classes).sum(dtype=torch.float)
         error = failures / predictions.size(0)
 
-        conf_mat_per_class = utils.Namespace({})
+        conf_mat_per_class = SimpleNamespace()
         conf_mat_per_class.true_positives = {}
         conf_mat_per_class.false_negatives = {}
         conf_mat_per_class.false_positives = {}
@@ -599,7 +599,7 @@ class Logger:
         Returns:
             Confusion matrix per class for top-k predictions.
         """
-        conf_mat_per_class = utils.Namespace({})
+        conf_mat_per_class = SimpleNamespace()
         conf_mat_per_class.true_positives = {}
         conf_mat_per_class.false_negatives = {}
         conf_mat_per_class.false_positives = {}
@@ -685,7 +685,10 @@ class Logger:
             fp_sum = fp.item()
 
         if tp_sum == 0:
-            return 0, 0, 0
+            p = 0.0 if fp_sum > 0 else 0.0
+            r = 0.0 if fn_sum > 0 else 0.0
+            f1 = 0.0
+            return p, r, f1
 
         p = tp_sum * 1.0 / (tp_sum + fp_sum)
         r = tp_sum * 1.0 / (tp_sum + fn_sum)

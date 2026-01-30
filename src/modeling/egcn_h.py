@@ -5,6 +5,8 @@ Implements evolving graph convolutions with historical context for temporal grap
 Modified from: https://github.com/IBM/EvolveGCN/blob/master/egcn_h.py
 """
 
+from types import SimpleNamespace
+
 import torch
 import torch.nn as nn
 from torch.nn.parameter import Parameter
@@ -32,15 +34,14 @@ class EGCN(torch.nn.Module):
             skipfeats: Whether to skip connection original features.
         """
         super().__init__()
-        GRCU_args = u.Namespace({})
 
         feats = [args.feats_per_node, args.layer_1_feats, args.layer_2_feats]
         self.device = device
         self.skipfeats = skipfeats
         self.GRCU_layers = nn.ModuleList()
         for i in range(1, len(feats)):
-            GRCU_args = u.Namespace(
-                {"in_feats": feats[i - 1], "out_feats": feats[i], "activation": activation}
+            GRCU_args = SimpleNamespace(
+                in_feats=feats[i - 1], out_feats=feats[i], activation=activation
             )
 
             grcu_i = GRCU(GRCU_args)
@@ -79,7 +80,7 @@ class GRCU(torch.nn.Module):
         """
         super().__init__()
         self.args = args
-        cell_args = u.Namespace({})
+        cell_args = SimpleNamespace()
         cell_args.rows = args.in_feats
         cell_args.cols = args.out_feats
 

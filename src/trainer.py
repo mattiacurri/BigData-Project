@@ -6,6 +6,7 @@ Handles the training, validation, and evaluation loops for temporal graph learni
 import gc
 import os
 import time
+from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
@@ -299,7 +300,7 @@ class Trainer:
         Returns:
                 Processed sample with tensors on correct device.
         """
-        sample = u.Namespace(sample)
+        sample = SimpleNamespace(**sample)
         for i, adj in enumerate(sample.hist_adj_list):
             # Get node features and handle batch dimension from DataLoader
             node_feats = sample.hist_ndFeats_list[i]

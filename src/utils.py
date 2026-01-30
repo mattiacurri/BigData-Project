@@ -3,6 +3,8 @@
 Taken from: https://github.com/IBM/EvolveGCN/blob/master/utils.py
 """
 
+from types import SimpleNamespace
+
 import torch
 import yaml
 
@@ -43,18 +45,6 @@ def sparse_prepare_tensor(tensor, torch_size, ignore_batch_dim=True):
     return torch.sparse_coo_tensor(
         tensor["idx"].t(), tensor["vals"].type(torch.float), tensor_size
     )
-
-
-class Namespace(object):
-    """Helper class for dictionary-like attribute access."""
-
-    def __init__(self, adict):
-        """Initialize namespace from dictionary.
-
-        Args:
-            adict: Dictionary to convert to namespace.
-        """
-        self.__dict__.update(adict)
 
 
 def parse_args(parser):

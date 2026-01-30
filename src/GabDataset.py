@@ -5,6 +5,7 @@ Loads and preprocesses temporal graph data from social network interactions.
 
 from pathlib import Path
 import pickle
+from types import SimpleNamespace
 from typing import Dict
 
 import pandas as pd
@@ -29,7 +30,7 @@ class GabDataset:
         assert args.task in ["link_pred", "edge_cls"], (
             "dataset only implements link_pred or edge_cls"
         )
-        args.gab_args = u.Namespace(args.gab_args)
+        args.gab_args = SimpleNamespace(**args.gab_args)
 
         # Setup for edge loading
         self.folder_path = Path(args.gab_args.folder)
@@ -37,7 +38,7 @@ class GabDataset:
         self.time_periods = ["2016-2021", "2022", "2023", "2024", "Jan-Jul 25", "Jul 25"]
         self.loaded_snapshots = set()  # Track which snapshots have been loaded
 
-        self.ecols = u.Namespace({"FromNodeId": 0, "ToNodeId": 1, "TimeStep": 2})
+        self.ecols = SimpleNamespace(FromNodeId=0, ToNodeId=1, TimeStep=2)
 
         edges_df = self._load_all_snapshots()
 
