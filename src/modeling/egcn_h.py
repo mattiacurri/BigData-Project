@@ -5,13 +5,18 @@ Implements evolving graph convolutions with historical context for temporal grap
 Modified from: https://github.com/IBM/EvolveGCN/blob/master/egcn_h.py
 """
 
-import math
-
 import torch
 import torch.nn as nn
 from torch.nn.parameter import Parameter
 
 import utils as u
+
+"""
+EGCN_O vs EGCN_H as implemented by them:
+
+In EGCN_O GRCU_layers do not use the nodes_mask_list, while in EGCN_H they do.
+In EGCN_O the mat_GRU_cell does not use the node embeddings or masks to evolve weights, but only the previous weights. As a consequence, EGCN_O do not use the TopK selector, while EGCN_H does. 
+"""
 
 
 class EGCN(torch.nn.Module):
@@ -59,9 +64,7 @@ class EGCN(torch.nn.Module):
 
         out = Nodes_list[-1]
         if self.skipfeats:
-            out = torch.cat(
-                (out, node_feats), dim=1
-            )  # use node_feats.to_dense() if 2hot encoded input
+            out = torch.cat((out, node_feats), dim=1)
         return out
 
 
@@ -84,17 +87,7 @@ class GRCU(torch.nn.Module):
 
         self.activation = self.args.activation
         self.GCN_init_weights = Parameter(torch.Tensor(self.args.in_feats, self.args.out_feats))
-        self.reset_param(self.GCN_init_weights)
-
-    def reset_param(self, t):
-        """Initialize tensor with uniform distribution.
-
-        Args:
-            t: Tensor to initialize.
-        """
-        # Initialize based on the number of columns
-        stdv = 1.0 / math.sqrt(t.size(1))
-        t.data.uniform_(-stdv, stdv)
+        nn.init.xavier_uniform_(self.GCN_init_weights)
 
     def forward(self, A_list, node_embs_list, mask_list):
         """Forward pass of GRCU.
@@ -179,24 +172,22 @@ class mat_GRU_gate(torch.nn.Module):
         """
         super().__init__()
         self.activation = activation
-        # the k here should be in_feats which is actually the rows
+
+        # Calculate gain based on activation type for proper initialization
+        if isinstance(activation, torch.nn.Sigmoid):
+            gain = nn.init.calculate_gain("sigmoid")
+        elif isinstance(activation, torch.nn.Tanh):
+            gain = nn.init.calculate_gain("tanh")
+        else:
+            gain = 1.0
+
         self.W = Parameter(torch.Tensor(rows, rows))
-        self.reset_param(self.W)
+        nn.init.xavier_uniform_(self.W, gain=gain)
 
         self.U = Parameter(torch.Tensor(rows, rows))
-        self.reset_param(self.U)
+        nn.init.xavier_uniform_(self.U, gain=gain)
 
         self.bias = Parameter(torch.zeros(rows, cols))
-
-    def reset_param(self, t):
-        """Initialize tensor with uniform distribution.
-
-        Args:
-            t: Tensor to initialize.
-        """
-        # Initialize based on the number of columns
-        stdv = 1.0 / math.sqrt(t.size(1))
-        t.data.uniform_(-stdv, stdv)
 
     def forward(self, x, hidden):
         """Forward pass of GRU gate.
@@ -225,19 +216,9 @@ class TopK(torch.nn.Module):
         """
         super().__init__()
         self.scorer = Parameter(torch.Tensor(feats, 1))
-        self.reset_param(self.scorer)
+        nn.init.xavier_uniform_(self.scorer)
 
         self.k = k
-
-    def reset_param(self, t):
-        """Initialize tensor with uniform distribution.
-
-        Args:
-            t: Tensor to initialize.
-        """
-        # Initialize based on the number of rows
-        stdv = 1.0 / math.sqrt(t.size(0))
-        t.data.uniform_(-stdv, stdv)
 
     def forward(self, node_embs, mask):
         """Forward pass to select top-K nodes.
@@ -260,13 +241,10 @@ class TopK(torch.nn.Module):
 
         tanh = torch.nn.Tanh()
 
-        if isinstance(node_embs, torch.sparse.FloatTensor) or isinstance(
-            node_embs, torch.cuda.sparse.FloatTensor
-        ):
+        if node_embs.is_sparse:
             node_embs = node_embs.to_dense()
 
         # Handle both 2D [nodes, features] and 3D [batch, nodes, features] tensors
-        original_shape = node_embs.shape
         if len(node_embs.shape) == 3:
             # Has batch dimension - flatten for indexing
             batch_size = node_embs.size(0)

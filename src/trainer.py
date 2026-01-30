@@ -232,7 +232,6 @@ class Trainer:
             hist_adj_list, hist_ndFeats_list, mask_list
         )  # Embedding produced by the GCN
 
-        # !
         predict_batch_size = 100000
         gather_predictions = []
 
@@ -384,10 +383,6 @@ class Trainer:
         if num_phases < 1:
             raise ValueError("Incremental training requires at least 2 snapshots")
 
-        print(f"\n{'=' * 60}")
-        print(f"Starting Incremental Training with {num_phases + 1} snapshots")
-        print(f"{'=' * 60}\n")
-
         all_results = []
 
         for phase_idx, (train_snapshot, test_snapshot) in enumerate(train_test_pairs):
@@ -429,12 +424,7 @@ class Trainer:
                 checkpoint_path,
             )
             print(f"Checkpoint saved: {checkpoint_path}")
-            # Free memory: clear temporal features cache after each phase
-            if hasattr(self.data, "clear_temporal_cache"):
-                self.data.clear_temporal_cache()
-                gc.collect()
-                if self.args.use_cuda:
-                    torch.cuda.empty_cache()
+
         # Print summary of all phases
         self._print_incremental_summary(all_results)
 
@@ -531,9 +521,7 @@ class Trainer:
         Args:
             all_results: List of results from each phase.
         """
-        print(f"\n{'=' * 60}")
         print("SUMMARY")
-        print(f"{'=' * 60}")
 
         for result in all_results:
             phase_type = "Initial Training" if result["is_initial"] else "Fine-tuning"

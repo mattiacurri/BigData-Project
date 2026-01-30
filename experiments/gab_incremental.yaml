@@ -5,28 +5,21 @@ gab_args:
 
 use_cuda: True
 
-model: egcn_o # egcn_h
+model: egcn_h # egcn_h
 
 task: link_pred
 
 class_weights: [0.5, 0.5] #[0.05, 0.95]
-save_node_embeddings: True # TODO: set to True when we have stable training
+save_node_embeddings: False # TODO: set to True when we have stable training
 
 incremental: True
-# used when incremental: False
-# train_proportion: 0.8
-# dev_proportion: 0.1
 
 finetune_epochs: 5  # Number of epochs for fine-tuning phases (after initial training)
 num_epochs: 5  # Number of epochs for initial training
 steps_accum_gradients: 1
-learning_rate: 0.00005
-learning_rate_min: 0
-learning_rate_max: 0
+learning_rate: 0.0005
 negative_mult_training: 3 # num_negatives = 1 * num_positives
 negative_mult_test: 1 # num_negatives = 1 * num_positives
-#max_negative_test_edges: 1000000  # Limit negative edges in test to 1M for memory efficiency (None = all edges)
-smart_neg_sampling: True
 target_measure: MAP  # Measure to define the best epoch
 target_class: 1  # Target class for metric calculation
 early_stop_patience: 100  # Reduced for fine-tuning phases
@@ -44,22 +37,14 @@ data_loading_params:
 gcn_parameters:
   feats_per_node: 768  # BERT embedding dimension
   layer_1_feats: 64
-  layer_1_feats_min: 32
-  layer_1_feats_max: 128
   layer_2_feats: 32
-  layer_2_feats_same_as_l1: "False"
   k_top_grcu: 768 #50
   num_layers: 2
   lstm_l1_layers: 1
-  lstm_l1_feats: 107
-  lstm_l1_feats_min: 20
-  lstm_l1_feats_max: 200
+  lstm_l1_feats: 128
   lstm_l2_layers: 1
-  lstm_l2_feats: None
-  lstm_l2_feats_same_as_l1: True
+  lstm_l2_feats: 128
   cls_feats: 1000
-  cls_feats_min: 0
-  cls_feats_max: 0
 
 comments:
   - Incremental training configuration for Gab dataset

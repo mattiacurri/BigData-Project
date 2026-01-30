@@ -10,16 +10,15 @@ import torch
 
 import utils as u
 
-ECOLS = u.Namespace({"source": 0, "target": 1, "time": 2, "label": 3})  # --> added for edge_cls
+ECOLS = u.Namespace({"source": 0, "target": 1, "time": 2})
 
 
-def get_sp_adj(edges, time, weighted, time_window):
+def get_sp_adj(edges, time, time_window):
     """Get sparse adjacency matrix for a specific time window.
 
     Args:
         edges: Edge list with timestamps.
         time: Target time.
-        weighted: Whether to include edge weights.
         time_window: Size of time window. If None, use all history from 0 to time.
 
     Returns:
@@ -37,11 +36,8 @@ def get_sp_adj(edges, time, weighted, time_window):
     vals = edges["vals"][subset]
     out = torch.sparse_coo_tensor(idx.t(), vals).coalesce()
 
-    idx = out._indices().t()
-    if weighted:
-        vals = out._values()
-    else:
-        vals = torch.ones(idx.size(0), dtype=torch.long)
+    idx = out.indices().t()
+    vals = torch.ones(idx.size(0), dtype=torch.long)
 
     return {"idx": idx, "vals": vals}
 
@@ -84,10 +80,10 @@ def normalize_adj(adj, num_nodes):
     )
 
     sparse_eye = make_sparse_eye(num_nodes)
-    sp_tensor = sparse_eye + sp_tensor
+    sp_tensor = (sparse_eye + sp_tensor).coalesce()
 
-    idx = sp_tensor._indices()
-    vals = sp_tensor._values()
+    idx = sp_tensor.indices()
+    vals = sp_tensor.values()
 
     degree = torch.sparse.sum(sp_tensor, dim=1).to_dense()
     di = degree[idx[0]]
@@ -143,14 +139,13 @@ def get_all_non_existing_edges(adj, tot_nodes):
     return {"idx": edges, "vals": vals}
 
 
-def get_non_existing_edges(adj, number, tot_nodes, smart_sampling, existing_nodes=None):
+def get_non_existing_edges(adj, number, tot_nodes, existing_nodes=None):
     """Sample non-existing edges for negative sampling.
 
     Args:
         adj: Adjacency dict with existing edges.
         number: Number of non-existing edges to sample.
         tot_nodes: Total number of nodes.
-        smart_sampling: Whether to sample from existing node neighborhoods.
         existing_nodes: Nodes with existing edges (for smart sampling).
 
     Returns:
@@ -165,27 +160,15 @@ def get_non_existing_edges(adj, number, tot_nodes, smart_sampling, existing_node
     # the maximum of edges would be all edges that don't exist between nodes that have edges
     num_edges = min(number, idx.shape[1] * (idx.shape[1] - 1) - len(true_ids))
 
-    if smart_sampling:
-        # existing_nodes = existing_nodes.numpy()
-        def sample_edges(num_edges):
-            from_id = np.random.choice(idx[0], size=num_edges, replace=True)
-            to_id = np.random.choice(existing_nodes, size=num_edges, replace=True)
+    # smart sampling: sample 4x candidates to have enough after filtering
+    num_candidates = num_edges * 4
+    from_id = np.random.choice(idx[0], size=num_candidates, replace=True)
+    to_id = np.random.choice(existing_nodes, size=num_candidates, replace=True)
 
-            if num_edges > 1:
-                edges = np.stack([from_id, to_id])
-            else:
-                edges = np.concatenate([from_id, to_id])
-            return edges
+    if num_candidates > 1:
+        edges = np.stack([from_id, to_id])
     else:
-
-        def sample_edges(num_edges):
-            if num_edges > 1:
-                edges = np.random.randint(0, tot_nodes, (2, num_edges))
-            else:
-                edges = np.random.randint(0, tot_nodes, (2,))
-            return edges
-
-    edges = sample_edges(num_edges * 4)
+        edges = np.concatenate([from_id, to_id])
 
     edge_ids = edges[0] * tot_nodes + edges[1]
 

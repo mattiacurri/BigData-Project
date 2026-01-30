@@ -3,11 +3,6 @@
 Taken from: https://github.com/IBM/EvolveGCN/blob/master/utils.py
 """
 
-import argparse
-import math
-import random
-
-import numpy as np
 import torch
 import yaml
 
@@ -50,16 +45,6 @@ def sparse_prepare_tensor(tensor, torch_size, ignore_batch_dim=True):
     )
 
 
-def reset_param(t):
-    """Reset parameter values uniformly.
-
-    Args:
-        t: Parameter tensor to reset.
-    """
-    stdv = 2.0 / math.sqrt(t.size(0))
-    t.data.uniform_(-stdv, stdv)
-
-
 class Namespace(object):
     """Helper class for dictionary-like attribute access."""
 
@@ -70,30 +55,6 @@ class Namespace(object):
             adict: Dictionary to convert to namespace.
         """
         self.__dict__.update(adict)
-
-
-def random_param_value(param, param_min, param_max, type="int"):
-    """Sample a random parameter value from a range.
-
-    Args:
-        param: Parameter value (if not None, returned as-is).
-        param_min: Minimum parameter value.
-        param_max: Maximum parameter value.
-        type: Type of sampling ('int', 'logscale', or 'float').
-
-    Returns:
-        Sampled parameter value.
-    """
-    if str(param) is None or str(param).lower() == "none":
-        if type == "int":
-            return random.randrange(param_min, param_max + 1)
-        elif type == "logscale":
-            interval = np.logspace(np.log10(param_min), np.log10(param_max), num=100)
-            return np.random.choice(interval, 1)[0]
-        else:
-            return random.uniform(param_min, param_max)
-    else:
-        return param
 
 
 def parse_args(parser):
@@ -112,56 +73,5 @@ def parse_args(parser):
         arg_dict = args.__dict__
         for key, value in data.items():
             arg_dict[key] = value
-
-    args.learning_rate = random_param_value(
-        args.learning_rate, args.learning_rate_min, args.learning_rate_max, type="logscale"
-    )
-    # args.adj_mat_time_window = random_param_value(args.adj_mat_time_window, args.adj_mat_time_window_min, args.adj_mat_time_window_max, type='int')
-    # args.num_hist_steps = random_param_value(
-    #     args.num_hist_steps, args.num_hist_steps_min, args.num_hist_steps_max, type="int"
-    # )
-
-    args.gcn_parameters["layer_1_feats"] = random_param_value(
-        args.gcn_parameters["layer_1_feats"],
-        args.gcn_parameters["layer_1_feats_min"],
-        args.gcn_parameters["layer_1_feats_max"],
-        type="int",
-    )
-    if (
-        args.gcn_parameters["layer_2_feats_same_as_l1"]
-        or args.gcn_parameters["layer_2_feats_same_as_l1"].lower() == "true"
-    ):
-        args.gcn_parameters["layer_2_feats"] = args.gcn_parameters["layer_1_feats"]
-    else:
-        args.gcn_parameters["layer_2_feats"] = random_param_value(
-            args.gcn_parameters["layer_2_feats"],
-            args.gcn_parameters["layer_1_feats_min"],
-            args.gcn_parameters["layer_1_feats_max"],
-            type="int",
-        )
-    args.gcn_parameters["lstm_l1_feats"] = random_param_value(
-        args.gcn_parameters["lstm_l1_feats"],
-        args.gcn_parameters["lstm_l1_feats_min"],
-        args.gcn_parameters["lstm_l1_feats_max"],
-        type="int",
-    )
-    if (
-        args.gcn_parameters["lstm_l2_feats_same_as_l1"]
-        or args.gcn_parameters["lstm_l2_feats_same_as_l1"].lower() == "true"
-    ):
-        args.gcn_parameters["lstm_l2_feats"] = args.gcn_parameters["lstm_l1_feats"]
-    else:
-        args.gcn_parameters["lstm_l2_feats"] = random_param_value(
-            args.gcn_parameters["lstm_l2_feats"],
-            args.gcn_parameters["lstm_l1_feats_min"],
-            args.gcn_parameters["lstm_l1_feats_max"],
-            type="int",
-        )
-    args.gcn_parameters["cls_feats"] = random_param_value(
-        args.gcn_parameters["cls_feats"],
-        args.gcn_parameters["cls_feats_min"],
-        args.gcn_parameters["cls_feats_max"],
-        type="int",
-    )
 
     return args

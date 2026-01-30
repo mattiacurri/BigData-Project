@@ -8,7 +8,7 @@ import torch
 import taskers_utils as tu
 
 
-class Link_Pred_Tasker:
+class LinkPrediction:
     """Creates a tasker object which computes the required inputs for training on a link prediction task.
 
     It receives a dataset object which should have two attributes: nodes_feats and edges, this
@@ -124,7 +124,7 @@ class Link_Pred_Tasker:
 
         # Get the number of nodes that exist at this snapshot (for memory efficiency)
         # Use only active nodes to reduce memory footprint significantly
-        num_active_nodes = len(self.dataset.nodes_per_snapshot[idx])
+        num_active_nodes = len(self.dataset.cumulative_nodes_per_snapshot[idx])
         active_node_indices = self.dataset.get_node_indices_at_snapshot(idx)
 
         # Create a mapping from original node IDs to compacted IDs
@@ -142,20 +142,16 @@ class Link_Pred_Tasker:
             cur_adj = tu.get_sp_adj(
                 edges=self.dataset.edges,
                 time=i,
-                weighted=True,
                 time_window=self.args.adj_mat_time_window,
             )
 
-            if self.args.smart_neg_sampling:
-                # Remap existing nodes to compacted space
-                unique_nodes = cur_adj["idx"].unique()
-                remapped = [
-                    node_mapping[int(n)] for n in unique_nodes.tolist() if int(n) in node_mapping
-                ]
-                if remapped:
-                    existing_nodes.append(torch.tensor(remapped, dtype=torch.long))
-            else:
-                existing_nodes = None
+            # Remap existing nodes to compacted space
+            unique_nodes = cur_adj["idx"].unique()
+            remapped = [
+                node_mapping[int(n)] for n in unique_nodes.tolist() if int(n) in node_mapping
+            ]
+            if remapped:
+                existing_nodes.append(torch.tensor(remapped, dtype=torch.long))
 
             # Remap adjacency indices to compacted space
             cur_adj = self._remap_adj_to_active_nodes(cur_adj, node_mapping, num_active_nodes)
@@ -183,7 +179,6 @@ class Link_Pred_Tasker:
         label_adj = tu.get_sp_adj(
             edges=self.dataset.edges,
             time=idx + 1,
-            weighted=False,
             time_window=self.args.adj_mat_time_window,
         )
 
@@ -194,10 +189,7 @@ class Link_Pred_Tasker:
         else:
             negative_multiplier = self.args.negative_mult_training
 
-        if self.args.smart_neg_sampling and existing_nodes:
-            existing_nodes = torch.cat(existing_nodes)
-        else:
-            existing_nodes = None
+        existing_nodes = torch.cat(existing_nodes)
 
         if "all_edges" in kwargs.keys() and kwargs["all_edges"] == True:
             non_existing_adj = tu.get_all_non_existing_edges(
@@ -208,7 +200,6 @@ class Link_Pred_Tasker:
                 adj=label_adj,
                 number=label_adj["vals"].size(0) * negative_multiplier,
                 tot_nodes=num_active_nodes,
-                smart_sampling=self.args.smart_neg_sampling,
                 existing_nodes=existing_nodes,
             )
 

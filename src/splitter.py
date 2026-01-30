@@ -9,10 +9,8 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader, Dataset
 
-import utils as u
 
-
-class splitter:
+class Splitter:
     """Creates 3 data splits: train, dev, and test."""
 
     def __init__(self, args, tasker):
@@ -40,7 +38,7 @@ class splitter:
         end = args.train_proportion
 
         end = int(np.floor(max_time_val * end))
-        train = data_split(tasker, start, end, test=False)
+        train = DataSplit(tasker, start, end, test=False)
         train = DataLoader(train, **args.data_loading_params)
 
         start = end
@@ -48,7 +46,7 @@ class splitter:
         end = int(np.floor(max_time_val * end))
 
         # all_edges: num_nodes * num_nodes - num_positive
-        dev = data_split(tasker, start, end, test=True, all_edges=True)
+        dev = DataSplit(tasker, start, end, test=True, all_edges=True)
 
         dev = DataLoader(dev, num_workers=args.data_loading_params["num_workers"])
 
@@ -56,7 +54,7 @@ class splitter:
 
         # the +1 is because I assume that max_time exists in the dataset
         end = max_time_val + 1
-        test = data_split(tasker, start, end, test=True, all_edges=True)
+        test = DataSplit(tasker, start, end, test=True, all_edges=True)
 
         test = DataLoader(test, num_workers=args.data_loading_params["num_workers"])
 
@@ -68,7 +66,7 @@ class splitter:
         self.test = test
 
 
-class incremental_splitter:
+class IncrementalSplitter:
     """Creates snapshot-based splits for incremental training.
 
     This splitter divides temporal data into discrete snapshots,
@@ -159,14 +157,14 @@ class incremental_splitter:
 
         for start, end in self.snapshot_boundaries:
             # Training version - uses normal negative sampling
-            train_data = data_split(self.tasker, start, end, test=False)
+            train_data = DataSplit(self.tasker, start, end, test=False)
             train_loader = DataLoader(
                 train_data, batch_size=1, num_workers=self.args.data_loading_params["num_workers"]
             )
             train_snapshots.append(train_loader)
 
             # Testing version - uses all_edges for full evaluation (Memory destroying)
-            test_data = data_split(self.tasker, start, end, test=True)  # , all_edges=True)
+            test_data = DataSplit(self.tasker, start, end, test=True)  # , all_edges=True)
 
             test_loader = DataLoader(
                 test_data, batch_size=1, num_workers=self.args.data_loading_params["num_workers"]
@@ -186,7 +184,7 @@ class incremental_splitter:
         return len(self.snapshots)
 
 
-class data_split(Dataset):
+class DataSplit(Dataset):
     """Dataset split for temporal data."""
 
     def __init__(self, tasker, start, end, test, **kwargs):

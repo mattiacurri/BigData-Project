@@ -37,12 +37,12 @@ class GabDataset:
         self.time_periods = ["2016-2021", "2022", "2023", "2024", "Jan-Jul 25", "Jul 25"]
         self.loaded_snapshots = set()  # Track which snapshots have been loaded
 
-        self.ecols = u.Namespace({"FromNodeId": 0, "ToNodeId": 1, "Weight": 2, "TimeStep": 3})
+        self.ecols = u.Namespace({"FromNodeId": 0, "ToNodeId": 1, "TimeStep": 2})
 
         edges_df = self._load_all_snapshots()
 
         edges = torch.tensor(
-            edges_df[["FromNodeId", "ToNodeId", "Weight", "TimeStep"]].values, dtype=torch.float32
+            edges_df[["FromNodeId", "ToNodeId", "TimeStep"]].values, dtype=torch.float32
         )
         edges = self.make_contigous_node_ids(edges)
 
@@ -61,24 +61,21 @@ class GabDataset:
             edges
         )  # mask the nodes that do not exist yet at each snapshot
 
-        # For link prediction, all loaded edges are positive (existing connections)
-        edges[:, self.ecols.Weight] = 1.0
-
         # Create sparse representation for edges
         sp_indices = (
             edges[:, [self.ecols.FromNodeId, self.ecols.ToNodeId, self.ecols.TimeStep]].long().t()
         )
-        sp_values = edges[:, self.ecols.Weight]
 
         # Create labels: all existing edges are positive (1)
-        new_vals = torch.ones(sp_values.size(0), dtype=torch.long)
+        new_vals = torch.ones(sp_indices.size(1), dtype=torch.long)
         # [from, to, time, label]
         indices_labels = torch.cat([sp_indices.t(), new_vals.view(-1, 1)], dim=1)
 
-        # Unweighted graph: all edges have weight 1
-        vals = torch.ones(sp_values.size(0), dtype=torch.float32)
+        # All edges have value 1
+        vals = torch.ones(sp_indices.size(1), dtype=torch.float32)
 
         self.edges = {"idx": indices_labels, "vals": vals}
+
         # Total number of nodes across all snapshots
         # !!! For now, we are excluding users without connections across all snapshots
         self.num_nodes = edges[:, [self.ecols.FromNodeId, self.ecols.ToNodeId]].unique().size(0)
@@ -107,7 +104,9 @@ class GabDataset:
 
         print(f"Features per node: {self.feats_per_node}")
         print(f"Number of nodes (total across all snapshots): {self.num_nodes}")
-        print(f"Nodes per snapshot: {[len(nodes) for nodes in self.nodes_per_snapshot.values()]}")
+        print(
+            f"Nodes per snapshot: {[len(nodes) for nodes in self.cumulative_nodes_per_snapshot.values()]}"
+        )
         print(f"Post-to-snapshot mappings: {len(self.post_to_snapshot)}")
 
     def _load_all_snapshots(self) -> pd.DataFrame:
@@ -138,7 +137,6 @@ class GabDataset:
                     "FromNodeId": edges[:, 0].numpy(),
                     "ToNodeId": edges[:, 1].numpy(),
                     "TimeStep": snapshot_idx,
-                    "Weight": 1,
                 }
             )
 
@@ -161,11 +159,11 @@ class GabDataset:
             snapshot_idx: Index of the snapshot to load.
 
         Returns:
-            DataFrame with columns ['FromNodeId', 'ToNodeId', 'TimeStep', 'Weight'].
+            DataFrame with columns ['FromNodeId', 'ToNodeId', 'TimeStep'].
         """
         if snapshot_idx in self.loaded_snapshots:
             print(f"Snapshot {snapshot_idx} already loaded, skipping...")
-            return pd.DataFrame(columns=["FromNodeId", "ToNodeId", "TimeStep", "Weight"])
+            return pd.DataFrame(columns=["FromNodeId", "ToNodeId", "TimeStep"])
 
         if snapshot_idx >= len(self.time_periods):
             raise ValueError(
@@ -185,7 +183,6 @@ class GabDataset:
                 "FromNodeId": edges[:, 0].numpy(),
                 "ToNodeId": edges[:, 1].numpy(),
                 "TimeStep": snapshot_idx,
-                "Weight": 1,
             }
         )
 
@@ -216,7 +213,6 @@ class GabDataset:
                 "FromNodeId": edges[:, 0].numpy(),
                 "ToNodeId": edges[:, 1].numpy(),
                 "TimeStep": snapshot_idx,
-                "Weight": 1,
             }
         )
 
@@ -230,9 +226,9 @@ class GabDataset:
         only have features for nodes that exist at that point in time.
 
         Args:
-            edges: Edge tensor with FromNodeId, ToNodeId, Weight, TimeStep columns.
+            edges: Edge tensor with FromNodeId, ToNodeId, TimeStep columns.
         """
-        self.nodes_per_snapshot: Dict[int, set] = {}
+        self.cumulative_nodes_per_snapshot: Dict[int, set] = {}
 
         min_time = int(self.min_time.item())
         max_time = int(self.max_time.item())
@@ -253,11 +249,13 @@ class GabDataset:
                 all_nodes_so_far.update(snapshot_nodes)
 
             # Store cumulative nodes (all nodes seen up to this snapshot)
-            self.nodes_per_snapshot[snapshot] = all_nodes_so_far.copy()
+            self.cumulative_nodes_per_snapshot[snapshot] = all_nodes_so_far.copy()
 
         print(f"\nNodes per snapshot (cumulative):")
-        for snapshot in sorted(self.nodes_per_snapshot.keys()):
-            print(f"  Snapshot {snapshot}: {len(self.nodes_per_snapshot[snapshot])} nodes")
+        for snapshot in sorted(self.cumulative_nodes_per_snapshot.keys()):
+            print(
+                f"  Snapshot {snapshot}: {len(self.cumulative_nodes_per_snapshot[snapshot])} nodes"
+            )
 
     def get_node_indices_at_snapshot(self, snapshot: int) -> torch.Tensor:
         """Get indices of nodes that exist up to the given snapshot.
@@ -268,10 +266,9 @@ class GabDataset:
         Returns:
             Tensor of node indices that exist up to this snapshot.
         """
-        # if snapshot in self.nodes_per_snapshot:
-        return torch.tensor(sorted(list(self.nodes_per_snapshot[snapshot])), dtype=torch.long)
-        # # Fallback to all nodes
-        # return torch.arange(self.num_nodes, dtype=torch.long)
+        return torch.tensor(
+            sorted(list(self.cumulative_nodes_per_snapshot[snapshot])), dtype=torch.long
+        )
 
     def _create_post_mappings(self, gab_args) -> tuple[Dict[int, int], Dict[int, int]]:
         """Create mappings from post_id to snapshot and post_id to user_id.
@@ -375,21 +372,6 @@ class GabDataset:
 
         return node_features
 
-    def clear_temporal_cache(self) -> None:
-        """Clear the temporal features cache to free memory.
-
-        Should be called after each incremental training phase or when
-        memory needs to be reclaimed.
-        """
-        cache_size = len(self._temporal_features_cache)
-        if cache_size > 0:
-            print(f"Clearing temporal features cache ({cache_size} entries)...")
-            self._temporal_features_cache.clear()
-            # Force garbage collection
-            import gc
-
-            gc.collect()
-
     def _load_edg_file(self, file_path):
         """Load edges from .edg file (tab-separated source-target pairs).
 
@@ -427,7 +409,6 @@ class GabDataset:
         edges_result = torch.zeros_like(edges)
         edges_result[:, self.ecols.FromNodeId] = new_node_ids[:, 0].float()
         edges_result[:, self.ecols.ToNodeId] = new_node_ids[:, 1].float()
-        edges_result[:, self.ecols.Weight] = edges[:, self.ecols.Weight]
         edges_result[:, self.ecols.TimeStep] = edges[:, self.ecols.TimeStep]
 
         return edges_result

@@ -5,7 +5,12 @@ Implements evolving graph convolutions with simplified weight evolution for temp
 Modified from: https://github.com/IBM/EvolveGCN/blob/master/egcn_h.py
 """
 
-import math
+"""
+EGCN_O vs EGCN_H as implemented by them:
+
+In EGCN_O GRCU_layers do not use the nodes_mask_list, while in EGCN_H they do.
+In EGCN_O the mat_GRU_cell does not use the node embeddings or masks to evolve weights, but only the previous weights. As a consequence, EGCN_O do not use the TopK selector, while EGCN_H does. 
+"""
 
 import torch
 import torch.nn as nn
@@ -59,9 +64,7 @@ class EGCN(torch.nn.Module):
 
         out = Nodes_list[-1]
         if self.skipfeats:
-            out = torch.cat(
-                (out, node_feats), dim=1
-            )  # use node_feats.to_dense() if 2hot encoded input
+            out = torch.cat((out, node_feats), dim=1)
         return out
 
 
@@ -84,17 +87,7 @@ class GRCU(torch.nn.Module):
 
         self.activation = self.args.activation
         self.GCN_init_weights = Parameter(torch.Tensor(self.args.in_feats, self.args.out_feats))
-        self.reset_param(self.GCN_init_weights)
-
-    def reset_param(self, t):
-        """Initialize tensor with uniform distribution.
-
-        Args:
-            t: Tensor to initialize.
-        """
-        # Initialize based on the number of columns
-        stdv = 1.0 / math.sqrt(t.size(1))
-        t.data.uniform_(-stdv, stdv)
+        nn.init.xavier_uniform_(self.GCN_init_weights)
 
     def forward(self, A_list, node_embs_list):
         """Forward pass of GRCU.
@@ -136,7 +129,7 @@ class mat_GRU_cell(torch.nn.Module):
 
         self.htilda = mat_GRU_gate(args.rows, args.cols, torch.nn.Tanh())
 
-        self.choose_topk = TopK(feats=args.rows, k=args.cols)
+        # We don't need the TopK here for EGCN_O
 
     def forward(self, prev_Q):  # ,prev_Z,mask):
         """Forward pass of matrix GRU cell.
@@ -147,8 +140,7 @@ class mat_GRU_cell(torch.nn.Module):
         Returns:
             Updated weight matrix.
         """
-        # z_topk = self.choose_topk(prev_Z,mask)
-        z_topk = prev_Q
+        z_topk = prev_Q  # use the previous weights as input
 
         update = self.update(z_topk, prev_Q)
         reset = self.reset(z_topk, prev_Q)
@@ -174,24 +166,22 @@ class mat_GRU_gate(torch.nn.Module):
         """
         super().__init__()
         self.activation = activation
-        # the k here should be in_feats which is actually the rows
+
+        # Calculate gain based on activation type for proper initialization
+        if isinstance(activation, torch.nn.Sigmoid):
+            gain = nn.init.calculate_gain("sigmoid")
+        elif isinstance(activation, torch.nn.Tanh):
+            gain = nn.init.calculate_gain("tanh")
+        else:
+            gain = 1.0
+
         self.W = Parameter(torch.Tensor(rows, rows))
-        self.reset_param(self.W)
+        nn.init.xavier_uniform_(self.W, gain=gain)
 
         self.U = Parameter(torch.Tensor(rows, rows))
-        self.reset_param(self.U)
+        nn.init.xavier_uniform_(self.U, gain=gain)
 
         self.bias = Parameter(torch.zeros(rows, cols))
-
-    def reset_param(self, t):
-        """Initialize tensor with uniform distribution.
-
-        Args:
-            t: Tensor to initialize.
-        """
-        # Initialize based on the number of columns
-        stdv = 1.0 / math.sqrt(t.size(1))
-        t.data.uniform_(-stdv, stdv)
 
     def forward(self, x, hidden):
         """Forward pass of GRU gate.
@@ -208,57 +198,4 @@ class mat_GRU_gate(torch.nn.Module):
         return out
 
 
-class TopK(torch.nn.Module):
-    """Top-K node selector with learnable scores."""
-
-    def __init__(self, feats, k):
-        """Initialize TopK selector.
-
-        Args:
-            feats: Number of features (input dimension).
-            k: Number of top nodes to select.
-        """
-        super().__init__()
-        self.scorer = Parameter(torch.Tensor(feats, 1))
-        self.reset_param(self.scorer)
-
-        self.k = k
-
-    def reset_param(self, t):
-        """Initialize tensor with uniform distribution.
-
-        Args:
-            t: Tensor to initialize.
-        """
-        # Initialize based on the number of rows
-        stdv = 1.0 / math.sqrt(t.size(0))
-        t.data.uniform_(-stdv, stdv)
-
-    def forward(self, node_embs, mask):
-        """Forward pass to select top-K nodes.
-
-        Args:
-            node_embs: Node embeddings.
-            mask: Node mask for masking.
-
-        Returns:
-            Weighted embeddings of top-K nodes.
-        """
-        scores = node_embs.matmul(self.scorer) / self.scorer.norm()
-        scores = scores + mask
-
-        vals, topk_indices = scores.view(-1).topk(self.k)
-        topk_indices = topk_indices[vals > -float("Inf")]
-
-        if topk_indices.size(0) < self.k:
-            topk_indices = u.pad_with_last_val(topk_indices, self.k)
-
-        tanh = torch.nn.Tanh()
-
-        if isinstance(node_embs, torch.sparse.SparseTensor):
-            node_embs = node_embs.to_dense()
-
-        out = node_embs[topk_indices] * tanh(scores[topk_indices].view(-1, 1))
-
-        # we need to transpose the output
-        return out.t()
+# No TopK selector in this variant

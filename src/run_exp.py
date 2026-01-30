@@ -15,162 +15,15 @@ import torch
 import GabDataset as ds
 
 # taskers
-import link_pred_tasker as lpt
-import modeling.egcn_h as egcn_h
-import modeling.egcn_o as egcn_o
+from LinkPrediction import LinkPrediction
 
 # models
-import models as mls
+import modeling.egcn_h as egcn_h
+import modeling.egcn_o as egcn_o
+import modeling.MLP as ClassifierHead
 import splitter as sp
 import trainer as tr
 import utils as u
-
-
-def random_param_value(param, param_min, param_max, type="int"):
-    """Generate a random parameter value within specified bounds.
-
-    Args:
-            param: The parameter value. If None/'none', a random value is generated.
-            param_min: Minimum parameter value.
-            param_max: Maximum parameter value.
-            type: Type of sampling - 'int' (uniform), 'logscale' (log-uniform), or 'float' (uniform).
-
-    Returns:
-            The parameter value (random if param is None, otherwise the param itself).
-    """
-    # if None or 'none' is specified, sample a random value
-    if str(param) is None or str(param).lower() == "none":
-        if type == "int":
-            return random.randrange(param_min, param_max + 1)
-        elif type == "logscale":
-            interval = np.logspace(np.log10(param_min), np.log10(param_max), num=100)
-            return np.random.choice(interval, 1)[0]
-        else:
-            return random.uniform(param_min, param_max)
-    else:
-        return param
-
-
-def build_random_hyper_params(args):
-    """Randomize and build hyperparameters for the model.
-
-    Args:
-            args: Configuration namespace containing parameter bounds.
-
-    Returns:
-            args: Updated configuration with randomized hyperparameters.
-    """
-    args.learning_rate = random_param_value(
-        args.learning_rate, args.learning_rate_min, args.learning_rate_max, type="logscale"
-    )
-
-    args.gcn_parameters["layer_1_feats"] = random_param_value(
-        args.gcn_parameters["layer_1_feats"],
-        args.gcn_parameters["layer_1_feats_min"],
-        args.gcn_parameters["layer_1_feats_max"],
-        type="int",
-    )
-    if (
-        args.gcn_parameters["layer_2_feats_same_as_l1"]
-        or args.gcn_parameters["layer_2_feats_same_as_l1"].lower() == "true"
-    ):
-        args.gcn_parameters["layer_2_feats"] = args.gcn_parameters["layer_1_feats"]
-    else:
-        args.gcn_parameters["layer_2_feats"] = random_param_value(
-            args.gcn_parameters["layer_2_feats"],
-            args.gcn_parameters["layer_1_feats_min"],
-            args.gcn_parameters["layer_1_feats_max"],
-            type="int",
-        )
-    args.gcn_parameters["lstm_l1_feats"] = random_param_value(
-        args.gcn_parameters["lstm_l1_feats"],
-        args.gcn_parameters["lstm_l1_feats_min"],
-        args.gcn_parameters["lstm_l1_feats_max"],
-        type="int",
-    )
-    if (
-        args.gcn_parameters["lstm_l2_feats_same_as_l1"]
-        or args.gcn_parameters["lstm_l2_feats_same_as_l1"].lower() == "true"
-    ):
-        args.gcn_parameters["lstm_l2_feats"] = args.gcn_parameters["lstm_l1_feats"]
-    else:
-        args.gcn_parameters["lstm_l2_feats"] = random_param_value(
-            args.gcn_parameters["lstm_l2_feats"],
-            args.gcn_parameters["lstm_l1_feats_min"],
-            args.gcn_parameters["lstm_l1_feats_max"],
-            type="int",
-        )
-    args.gcn_parameters["cls_feats"] = random_param_value(
-        args.gcn_parameters["cls_feats"],
-        args.gcn_parameters["cls_feats_min"],
-        args.gcn_parameters["cls_feats_max"],
-        type="int",
-    )
-    return args
-
-
-def build_gcn(args, tasker):
-    """Build the GCN model based on configuration.
-
-    Args:
-            args: Configuration namespace specifying model type and parameters.
-            tasker: Tasker object containing feature dimensionality.
-
-    Returns:
-            Compiled GCN model on the specified device.
-
-    Raises:
-            AssertionError: If LSTM/GRU models are used without sufficient history.
-            NotImplementedError: If the specified model is not recognized.
-    """
-    gcn_args = u.Namespace(args.gcn_parameters)
-    gcn_args.feats_per_node = tasker.nodes  # BERT Embeddings
-    if args.model == "gcn":
-        return mls.Sp_GCN(gcn_args, activation=torch.nn.RReLU()).to(args.device)
-    elif args.model == "skipgcn":
-        return mls.Sp_Skip_GCN(gcn_args, activation=torch.nn.RReLU()).to(args.device)
-    elif args.model == "skipfeatsgcn":
-        return mls.Sp_Skip_NodeFeats_GCN(gcn_args, activation=torch.nn.RReLU()).to(args.device)
-    else:
-        assert args.num_hist_steps > 0, "more than one step is necessary to train LSTM"
-        if args.model == "lstmA":
-            return mls.Sp_GCN_LSTM_A(gcn_args, activation=torch.nn.RReLU()).to(args.device)
-        elif args.model == "gruA":
-            return mls.Sp_GCN_GRU_A(gcn_args, activation=torch.nn.RReLU()).to(args.device)
-        elif args.model == "lstmB":
-            return mls.Sp_GCN_LSTM_B(gcn_args, activation=torch.nn.RReLU()).to(args.device)
-        elif args.model == "gruB":
-            return mls.Sp_GCN_GRU_B(gcn_args, activation=torch.nn.RReLU()).to(args.device)
-        elif args.model == "egcn_h":
-            return egcn_h.EGCN(gcn_args, activation=torch.nn.RReLU(), device=args.device)
-        elif args.model == "egcn_o":
-            return egcn_o.EGCN(gcn_args, activation=torch.nn.RReLU(), device=args.device)
-        else:
-            raise NotImplementedError(
-                f"{args.model} not implemented. Choose among: gcn, skipgcn, skipfeatsgcn, lstmA, lstmB, gruA, gruB, egcn_h, skipfeatsegcn_h, egcn_o"
-            )
-
-
-def build_classifier(args, tasker):
-    """Build the classification layer.
-
-    Args:
-            args: Configuration namespace.
-            tasker: Tasker object containing number of classes.
-
-    Returns:
-            Classifier module on the specified device.
-    """
-    mult = 2  # link prediction, classifier input [embedding_node_u || embedding_node_v]
-    if "gru" in args.model or "lstm" in args.model:
-        in_feats = args.gcn_parameters["lstm_l2_feats"] * mult
-    elif args.model == "skipfeatsgcn" or args.model == "skipfeatsegcn_h":
-        in_feats = (args.gcn_parameters["layer_2_feats"] + tasker.nodes) * mult
-    else:
-        in_feats = args.gcn_parameters["layer_2_feats"] * mult
-
-    return mls.Classifier(args, in_features=in_feats).to(args.device)
-
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
@@ -194,15 +47,14 @@ if __name__ == "__main__":
     torch.cuda.manual_seed_all(seed)
     args.seed = seed
 
-    # Assign the requested random hyper parameters
-    # if 'none' is specified for a parameter, a random value will be sampled
-    # if a value is specified, that value will be used
-    args = build_random_hyper_params(args)
+    # deterministic cuda
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
     # build the dataset
     dataset = ds.GabDataset(args)
     # build the tasker
-    tasker = lpt.Link_Pred_Tasker(args, dataset)
+    tasker = LinkPrediction(args, dataset)
 
     # Set default finetune_epochs if not specified
     if not hasattr(args, "finetune_epochs") or args.finetune_epochs is None:
@@ -213,16 +65,38 @@ if __name__ == "__main__":
 
     # build the incremental splitter
     if args.incremental:
-        splitter = sp.incremental_splitter(args, tasker)
+        splitter = sp.IncrementalSplitter(args, tasker)
     else:
-        splitter = sp.splitter(args, tasker)
+        splitter = sp.Splitter(args, tasker)
 
-    # build the models
-    gcn = build_gcn(args, tasker)
-    classifier = build_classifier(args, tasker)
+    # build the model
+    # GCN
+    gcn_args = u.Namespace(args.gcn_parameters)
+    gcn_args.feats_per_node = dataset.feats_per_node
+
+    if args.model == "egcn_h":
+        gcn = egcn_h.EGCN(gcn_args, activation=torch.nn.RReLU(), device=args.device)
+    elif args.model == "egcn_o":
+        gcn = egcn_o.EGCN(gcn_args, activation=torch.nn.RReLU(), device=args.device)
+    else:
+        raise NotImplementedError(f"{args.model} not implemented. Choose among: egcn_h, egcn_o")
+
+    # Classifier Head
+    # 2 -> num_classes for link prediction
+    # For EGCN models, use layer_2_feats; for LSTM-based models, use lstm_l2_feats
+    if args.model in ["egcn_h", "egcn_o"]:
+        gcn_output_dim = args.gcn_parameters["layer_2_feats"]
+        print(f"Using EGCN model with output dimension: {gcn_output_dim}")
+    else:
+        gcn_output_dim = args.gcn_parameters["lstm_l2_feats"]
+        print(f"Using LSTM-based model with output dimension: {gcn_output_dim}")
+
+    print(f"Classifier input dimension (2*output_dim): {gcn_output_dim * 2}")
+    classifier = ClassifierHead.MLP(args, in_features=gcn_output_dim * 2).to(args.device)
+
     # build a loss
     weights = torch.tensor(args.class_weights, dtype=torch.float).to(args.device)
-    cross_entropy = torch.nn.CrossEntropyLoss(weight=weights)
+    loss = torch.nn.CrossEntropyLoss(weight=weights)
 
     # trainer
     trainer = tr.Trainer(
@@ -230,7 +104,7 @@ if __name__ == "__main__":
         splitter=splitter,
         gcn=gcn,
         classifier=classifier,
-        comp_loss=cross_entropy,
+        comp_loss=loss,
         dataset=dataset,
     )
 

@@ -184,13 +184,13 @@ class Logger:
             self.stdout_handler = stdout_handler
 
             print(f"\n{'=' * 60}")
-            print(f"📁 Log file: {self.log_name}")
-            print(f"📊 Metrics JSON: {self.metrics_json_path}")
+            print(f"Log file: {self.log_name}")
+            print(f"Metrics JSON: {self.metrics_json_path}")
             print(f"{'=' * 60}\n")
 
-            logging.info("*** PARAMETERS ***")
-            logging.info(pprint.pformat(args.__dict__))
-            logging.info("")
+            # logging.info("*** PARAMETERS ***")
+            # logging.info(pprint.pformat(args.__dict__))
+            # logging.info("")
         else:
             self.log_name = None
             self.metrics_json_path = None
@@ -486,7 +486,6 @@ class Logger:
         if do_softmax:
             probs = torch.softmax(predictions, dim=1)[:, 1]
         else:
-            print("HERE I AM")
             probs = predictions
 
         print(len(probs))
