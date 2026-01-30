@@ -24,12 +24,7 @@ class GabDataset:
         Args:
             args: Configuration namespace with dataset parameters.
 
-        Raises:
-            AssertionError: If task is not 'link_pred' or 'edge_cls'.
         """
-        assert args.task in ["link_pred", "edge_cls"], (
-            "dataset only implements link_pred or edge_cls"
-        )
         args.gab_args = SimpleNamespace(**args.gab_args)
 
         # Setup for edge loading

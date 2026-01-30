@@ -18,6 +18,7 @@ import numpy as np
 from scipy.sparse import coo_matrix
 from sklearn.metrics import average_precision_score
 import torch
+import wandb
 
 import utils
 
@@ -143,16 +144,7 @@ class Logger:
         if args is not None:
             currdate = str(datetime.datetime.today().strftime("%Y%m%d%H%M%S"))
             self.log_name = (
-                "log/log_"
-                + args.data
-                + "_"
-                + args.task
-                + "_"
-                + args.model
-                + "_"
-                + currdate
-                + "_r"
-                + ".log"
+                "log/log_" + args.data + "_" + args.model + "_" + currdate + "_r" + ".log"
             )
             self.metrics_json_path = self.log_name.replace(".log", "_metrics.json")
 
@@ -202,6 +194,38 @@ class Logger:
         self.minibatch_log_interval = minibatch_log_interval
         self.eval_k_list = [10, 100, 1000]
         self.args = args
+        self.global_step = 0  # Global step counter for WandB
+        self.phase_idx = 0
+        self.phase_desc = "initial"
+
+        # Initialize WandB if not already initialized
+        if args is not None and not wandb.run:
+            try:
+                wandb.init(
+                    project=args.data,
+                    name=f"{args.model}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}",
+                    config=vars(args),
+                    reinit=False,
+                    save_code=False,
+                )
+            except Exception as e:
+                logging.warning(f"Failed to initialize WandB: {e}")
+
+    def set_phase(self, phase_idx, phase_desc):
+        """Set current phase for incremental logging.
+
+        Args:
+            phase_idx: Phase index number.
+            phase_desc: Phase description string.
+        """
+        self.phase_idx = phase_idx
+        self.phase_desc = phase_desc
+        if wandb.run:
+            try:
+                # Use config/summary to store phase info (not as time-series metric)
+                wandb.config.update({"phase_idx": phase_idx, "phase_desc": phase_desc})
+            except Exception as e:
+                logging.warning(f"Failed to log phase to WandB: {e}")
 
     def log_str(self, message, level="info"):
         """Log a string message with specified level.
@@ -231,9 +255,6 @@ class Logger:
         self.verbose = True
 
         is_train = self.set.startswith("TRAIN")
-        if hasattr(self, "args") and hasattr(self.args, "train_epoch_log"):
-            if is_train and (self.epoch + 1) % self.args.train_epoch_log != 0:
-                self.verbose = False
 
         # Override verbose for validation/test
         if not is_train:
@@ -296,7 +317,7 @@ class Logger:
             **kwargs: Additional arguments (e.g., adj for link prediction).
         """
         probs = torch.softmax(predictions, dim=1)[:, 1]
-        if self.set.startswith("TEST") or self.set.startswith("VALID"):
+        if "adj" in kwargs:
             MRR = self.get_MRR(probs, true_classes, kwargs["adj"], do_softmax=False)
         else:
             MRR = torch.tensor([0.0])
@@ -334,20 +355,40 @@ class Logger:
                 self.conf_mat_fp_list[cl].append(conf_mat_per_class.false_positives[cl])
 
         self.minibatch_done += 1
+        self.global_step += 1
+
         if self.minibatch_done % self.minibatch_log_interval == 0:
             mb_error = self.calc_epoch_metric(self.batch_sizes, self.errors)
             mb_MRR = self.calc_epoch_metric(self.batch_sizes, self.MRRs)
             mb_MAP = self.calc_epoch_metric(self.batch_sizes, self.MAPs)
             partial_losses = torch.stack(self.losses)
+            mb_loss = partial_losses.mean().item()
 
             if self.verbose:
                 logging.info(
                     f"  📦 Batch {self.minibatch_done}/{self.num_minibatches} | "
-                    f"Loss: {partial_losses.mean():.4f} | "
+                    f"Loss: {mb_loss:.4f} | "
                     f"Err: {mb_error:.4f} | "
                     f"MRR: {mb_MRR:.4f} | "
                     f"MAP: {mb_MAP:.4f}"
                 )
+
+            # Log minibatch metrics to WandB
+            if wandb.run:
+                try:
+                    prefix = f"{self.set.lower()}/minibatch/"
+                    wandb.log(
+                        {
+                            f"{prefix}loss": mb_loss,
+                            f"{prefix}error": mb_error,
+                            f"{prefix}mrr": mb_MRR,
+                            f"{prefix}map": mb_MAP,
+                            f"{prefix}batch": self.minibatch_done,
+                        },
+                        step=self.global_step,
+                    )
+                except Exception as e:
+                    logging.warning(f"Failed to log minibatch to WandB: {e}")
 
         self.lasttime = time.monotonic()
 
@@ -375,17 +416,17 @@ class Logger:
         if self.args.target_measure == "MAP" or self.args.target_measure == "map":
             eval_measure = epoch_MAP
 
-        precision, recall, f1 = self.calc_microavg_eval_measures(
+        micro_precision, micro_recall, micro_f1 = self.calc_microavg_eval_measures(
             self.conf_mat_tp, self.conf_mat_fn, self.conf_mat_fp
         )
 
         if str(self.args.target_class) == "AVG":
             if self.args.target_measure == "Precision" or self.args.target_measure == "prec":
-                eval_measure = precision
+                eval_measure = micro_precision
             elif self.args.target_measure == "Recall" or self.args.target_measure == "rec":
-                eval_measure = recall
+                eval_measure = micro_recall
             else:
-                eval_measure = f1
+                eval_measure = micro_f1
 
         # Calculate per-class metrics
         class_metrics = {}
@@ -402,17 +443,28 @@ class Logger:
                 else:
                     eval_measure = cl_f1
 
+        # Calculate macro-averaged metrics
+        macro_precision = sum(m["precision"] for m in class_metrics.values()) / self.num_classes
+        macro_recall = sum(m["recall"] for m in class_metrics.values()) / self.num_classes
+        macro_f1 = sum(m["f1"] for m in class_metrics.values()) / self.num_classes
+
+        # Use macro-averaged for overall metrics
+        precision, recall, f1 = macro_precision, macro_recall, macro_f1
+
         # ASCII Table Summary
         main_metrics = {
             "Loss": f"{mean_loss:.4f}",
             "Error": f"{epoch_error:.4f}",
-            "Precision": f"{precision:.4f}",
-            "Recall": f"{recall:.4f}",
-            "F1": f"{f1:.4f}",
+            "Macro Prec": f"{precision:.4f}",
+            "Macro Rec": f"{recall:.4f}",
+            "Macro F1": f"{f1:.4f}",
             "MRR": f"{epoch_MRR:.4f}",
             "MAP": f"{epoch_MAP:.4f}",
-            "Time": f"{epoch_time:.1f}s",
         }
+
+        # Add time only for train/val, not for test
+        if self.set != "TEST":
+            main_metrics["Time"] = f"{epoch_time:.1f}s"
 
         table = format_metrics_table(self.set, self.epoch, main_metrics)
 
@@ -449,9 +501,12 @@ class Logger:
             "loss": mean_loss,
             "error": epoch_error,
             "metrics": {
-                "precision": precision,
-                "recall": recall,
-                "f1": f1,
+                "macro_precision": precision,
+                "macro_recall": recall,
+                "macro_f1": f1,
+                "micro_precision": micro_precision,
+                "micro_recall": micro_recall,
+                "micro_f1": micro_f1,
                 "mrr": epoch_MRR,
                 "map": epoch_MAP,
             },
@@ -460,6 +515,45 @@ class Logger:
         }
         self.metrics_history.append(epoch_metrics)
         self._save_metrics_json()
+
+        # Log to WandB
+        if wandb.run:
+            try:
+                # Base metrics with set prefix for organization
+                prefix = f"{self.set.lower()}/"
+
+                # Increment global step for epoch-level logging
+                self.global_step += 1
+
+                wandb.log(
+                    {
+                        f"{prefix}epoch": self.epoch,
+                        f"{prefix}loss": mean_loss,
+                        f"{prefix}error": epoch_error,
+                        f"{prefix}macro_precision": precision,
+                        f"{prefix}macro_recall": recall,
+                        f"{prefix}macro_f1": f1,
+                        f"{prefix}micro_precision": micro_precision,
+                        f"{prefix}micro_recall": micro_recall,
+                        f"{prefix}micro_f1": micro_f1,
+                        f"{prefix}mrr": epoch_MRR,
+                        f"{prefix}map": epoch_MAP,
+                        f"{prefix}time_seconds": epoch_time,
+                        # Per-class metrics
+                        **{
+                            f"{prefix}class_{cl}_precision": m["precision"]
+                            for cl, m in class_metrics.items()
+                        },
+                        **{
+                            f"{prefix}class_{cl}_recall": m["recall"]
+                            for cl, m in class_metrics.items()
+                        },
+                        **{f"{prefix}class_{cl}_f1": m["f1"] for cl, m in class_metrics.items()},
+                    },
+                    step=self.global_step,
+                )
+            except Exception as e:
+                logging.warning(f"Failed to log to WandB: {e}")
 
         return eval_measure
 
@@ -489,12 +583,9 @@ class Logger:
         else:
             probs = predictions
 
-        print(f"Len probs: {len(probs)}")
-        print(probs)
-
-        probs = probs.cpu().numpy()
-        true_classes = true_classes.cpu().numpy()
-        adj = adj.cpu().numpy()
+        probs = probs.detach().cpu().numpy()
+        true_classes = true_classes.detach().cpu().numpy()
+        adj = adj.detach().cpu().numpy()
 
         pred_matrix = coo_matrix((probs, (adj[0], adj[1]))).toarray()
         true_matrix = coo_matrix((true_classes, (adj[0], adj[1]))).toarray()
@@ -505,7 +596,7 @@ class Logger:
             if np.isin(1, true_matrix[i]):
                 row_MRRs.append(self.get_row_MRR(pred_row, true_matrix[i]))
 
-        avg_MRR = torch.tensor(row_MRRs).mean()
+        avg_MRR = torch.tensor(row_MRRs).mean() if len(row_MRRs) > 0 else torch.tensor(0.0)
         return avg_MRR
 
     def get_row_MRR(self, probs, true_classes):
@@ -519,6 +610,7 @@ class Logger:
             float: MRR for this row.
         """
         existing_mask = true_classes == 1
+
         # descending in probability
         ordered_indices = np.flip(probs.argsort())
 

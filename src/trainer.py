@@ -97,7 +97,7 @@ class Trainer:
             self.classifier.train()
             eval_train, nodes_embs = self.run_epoch(self.splitter.train, e, "TRAIN", grad=True)
 
-            if len(self.splitter.dev) > 0 and e > self.args.eval_after_epochs:
+            if len(self.splitter.dev) > 0:
                 # Set models to evaluation mode
                 self.gcn.eval()
                 self.classifier.eval()
@@ -106,17 +106,8 @@ class Trainer:
                     best_eval_valid = eval_valid
                     epochs_without_impr = 0
                     print("### w" + ") ep " + str(e) + " - Best valid measure:" + str(eval_valid))
-                else:
-                    epochs_without_impr += 1
-                    if epochs_without_impr > self.args.early_stop_patience:
-                        print("### w" + ") ep " + str(e) + " - Early stop.")
-                        break
 
-            if (
-                len(self.splitter.test) > 0
-                and eval_valid == best_eval_valid
-                and e > self.args.eval_after_epochs
-            ):
+            if len(self.splitter.test) > 0 and eval_valid == best_eval_valid:
                 # Set models to evaluation mode
                 self.gcn.eval()
                 self.classifier.eval()
@@ -182,14 +173,9 @@ class Trainer:
                 pbar.set_postfix(
                     {"loss": f"{running_loss:.4f}", "batch_loss": f"{loss.item():.4f}"}
                 )
-                if (
-                    set_name.startswith("TEST") or set_name.startswith("VALID")
-                ) and self.args.task == "link_pred":
-                    self.logger.log_minibatch(
-                        predictions, s.label_sp["vals"], loss.detach(), adj=s.label_sp["idx"]
-                    )
-                else:
-                    self.logger.log_minibatch(predictions, s.label_sp["vals"], loss.detach())
+                self.logger.log_minibatch(
+                    predictions, s.label_sp["vals"], loss.detach(), adj=s.label_sp["idx"]
+                )
 
                 if grad:
                     self.optim_step(loss)
@@ -331,10 +317,7 @@ class Trainer:
             "vals": sample.label_sp["vals"][0],
         }
 
-        if self.args.task in ["link_pred", "edge_cls"]:
-            label_sp["idx"] = label_sp["idx"].to(self.args.device).t()
-        else:
-            label_sp["idx"] = label_sp["idx"].to(self.args.device)
+        label_sp["idx"] = label_sp["idx"].to(self.args.device).t()
 
         label_sp["vals"] = label_sp["vals"].type(torch.long).to(self.args.device)
         sample.label_sp = label_sp
@@ -471,6 +454,10 @@ class Trainer:
             "best_epoch": 0,
         }
 
+        # Set phase for logging
+        if hasattr(self, "logger") and self.logger:
+            self.logger.set_phase(phase_idx, phase_desc)
+
         for e in range(num_epochs):
             # Training
             self.gcn.train()
@@ -486,14 +473,6 @@ class Trainer:
             eval_test, _ = self.run_epoch(test_snapshot, e, f"TEST [{phase_desc}]", grad=False)
             phase_results["test_metrics"].append(eval_test)
 
-            # Log summary if it's a test epoch or if it aligns with train_epoch_log
-            should_log = True
-            if hasattr(self.args, "train_epoch_log"):
-                should_log = (e + 1) % self.args.train_epoch_log == 0
-
-            if should_log:
-                print(f"[{phase_desc}] Epoch {e}: Train={eval_train:.4f}, Test={eval_test:.4f}")
-
             # Track best performance
             if eval_test > best_eval_test:
                 best_eval_test = eval_test
@@ -502,11 +481,6 @@ class Trainer:
                 print(f"  -> New best test metric: {best_eval_test:.4f}")
             else:
                 epochs_without_impr += 1
-
-            # Early stopping
-            if epochs_without_impr > self.args.early_stop_patience:
-                print(f"  -> Early stopping at epoch {e}")
-                break
 
         phase_results["best_test_metric"] = best_eval_test
         phase_results["best_epoch"] = best_epoch

@@ -84,7 +84,6 @@ class IncrementalSplitter:
                 - num_hist_steps: Number of historical steps for GCN input.
                 - adj_mat_time_window: Time window for adjacency matrix.
                 - data_loading_params: DataLoader parameters.
-                - task: Task type (e.g., 'link_pred').
                 - num_snapshots: Number of snapshots to create (optional).
             tasker: Tasker object with dataset information.
         """
