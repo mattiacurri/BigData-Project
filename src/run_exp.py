@@ -21,6 +21,7 @@ from LinkPrediction import LinkPrediction
 # models
 import modeling.egcn_h as egcn_h
 import modeling.egcn_o as egcn_o
+import modeling.losses as losses
 import modeling.MLP as ClassifierHead
 import splitter as sp
 import trainer as tr
@@ -98,6 +99,7 @@ if __name__ == "__main__":
     # build a loss
     weights = torch.tensor(args.class_weights, dtype=torch.float).to(args.device)
     loss = torch.nn.CrossEntropyLoss(weight=weights)
+    # loss = losses.FocalLoss(alpha=1.0, gamma=2.0, weight=weights)
 
     # trainer
     trainer = tr.Trainer(

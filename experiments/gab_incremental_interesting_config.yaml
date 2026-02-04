@@ -20,12 +20,9 @@ negative_mult_training: 1 # num_negatives = 1 * num_positives
 negative_mult_test: 1 # num_negatives = 1 * num_positives
 target_measure: MAP  # Measure to define the best epoch
 target_class: 1  # Target class for metric calculation
-early_stop_patience: 100  # Reduced for fine-tuning phases
+seed: 42
 
-eval_after_epochs: 10  # Start evaluating from first epoch in incremental mode
-train_epoch_log: 5 # Log to stdout every n epochs
 adj_mat_time_window: None
-
 num_hist_steps: 1
 
 data_loading_params:

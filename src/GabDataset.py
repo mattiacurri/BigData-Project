@@ -12,8 +12,6 @@ import pandas as pd
 import torch
 from tqdm import tqdm
 
-import utils as u
-
 
 class GabDataset:
     """Social network dataset with temporal edge information."""

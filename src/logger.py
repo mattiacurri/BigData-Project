@@ -9,18 +9,16 @@ import datetime
 import json
 import logging
 import os
-import pprint
 import sys
 import time
 from types import SimpleNamespace
+from typing import Dict, Optional
 
 import numpy as np
 from scipy.sparse import coo_matrix
 from sklearn.metrics import average_precision_score
 import torch
 import wandb
-
-import utils
 
 
 class ColoredFormatter(logging.Formatter):
@@ -286,7 +284,7 @@ class Logger:
                 self.conf_mat_fn_at_k[k][cl] = 0
                 self.conf_mat_fp_at_k[k][cl] = 0
 
-        if self.set == "TEST":
+        if self.set.startswith("TEST"):
             self.conf_mat_tp_list = {}
             self.conf_mat_fn_list = {}
             self.conf_mat_fp_list = {}
@@ -306,6 +304,12 @@ class Logger:
 
         self.lasttime = time.monotonic()
         self.ep_time = self.lasttime
+
+        # Initialize buffer for graph predictions on TEST set
+        if self.set.startswith("TEST"):
+            self.pred_edges_idx = []  # List of [2, batch_size] tensors
+            self.pred_edges_vals = []  # List of [batch_size] tensors (binary predictions)
+            self.pred_edge_probs = []  # List of [batch_size] tensors (probabilities)
 
     def log_minibatch(self, predictions, true_classes, loss, **kwargs):
         """Log metrics for a single minibatch.
@@ -349,7 +353,7 @@ class Logger:
                 self.conf_mat_tp_at_k[k][cl] += conf_mat_per_class_at_k[k].true_positives[cl]
                 self.conf_mat_fn_at_k[k][cl] += conf_mat_per_class_at_k[k].false_negatives[cl]
                 self.conf_mat_fp_at_k[k][cl] += conf_mat_per_class_at_k[k].false_positives[cl]
-            if self.set == "TEST":
+            if self.set.startswith("TEST"):
                 self.conf_mat_tp_list[cl].append(conf_mat_per_class.true_positives[cl])
                 self.conf_mat_fn_list[cl].append(conf_mat_per_class.false_negatives[cl])
                 self.conf_mat_fp_list[cl].append(conf_mat_per_class.false_positives[cl])
@@ -389,6 +393,16 @@ class Logger:
                     )
                 except Exception as e:
                     logging.warning(f"Failed to log minibatch to WandB: {e}")
+
+        # Accumulate predictions for graph metrics calculation on TEST set
+        if self.set.startswith("TEST"):
+            probs = torch.softmax(predictions, dim=1)[:, 1]
+            pred_binary = (probs > 0.5).long()
+
+            if "adj" in kwargs:
+                self.pred_edges_idx.append(kwargs["adj"].cpu())
+                self.pred_edges_vals.append(pred_binary.cpu())
+                self.pred_edge_probs.append(probs.cpu())
 
         self.lasttime = time.monotonic()
 
@@ -556,6 +570,120 @@ class Logger:
                 logging.warning(f"Failed to log to WandB: {e}")
 
         return eval_measure
+
+    def compute_and_log_phase_graph_metrics(
+        self, num_nodes: int, phase_idx: int, snapshot_idx: int
+    ) -> Dict[str, float]:
+        """Compute and log graph structure metrics at the end of a training phase.
+
+        This method should be called at the end of each incremental training phase
+        to compute structural metrics on the predicted graph from the last epoch's
+        TEST predictions.
+
+        Args:
+            num_nodes: Total number of nodes in the graph
+            phase_idx: Current phase index
+            snapshot_idx: Index of the snapshot being tested
+
+        Returns:
+            Dict with all graph metrics, or empty dict if no predictions accumulated
+        """
+        # Check if we have accumulated predictions
+        if not hasattr(self, "pred_edges_idx") or len(self.pred_edges_idx) == 0:
+            logging.warning("No TEST predictions accumulated for graph metrics")
+            return {}
+
+        # Import graph_metrics here to avoid circular import
+        try:
+            import graph_metrics
+
+            # Concatenate edge indices and values
+            all_edge_idx = torch.cat(self.pred_edges_idx, dim=1)  # [2, total_edges]
+            all_edge_vals = torch.cat(self.pred_edges_vals, dim=0)  # [total_edges]
+            all_edge_probs = torch.cat(self.pred_edge_probs, dim=0)  # [total_edges]
+
+            # Compute metrics
+            metrics = graph_metrics.GraphMetricsCalculator.compute_all_metrics(
+                all_edge_idx, all_edge_vals, num_nodes, threshold=0.5
+            )
+
+            # Log to console (ASCII table)
+            self.log_graph_metrics_table(metrics, phase_idx, snapshot_idx)
+
+            # Log to WandB
+            if wandb.run:
+                try:
+                    wandb.log(
+                        {
+                            f"phase_{phase_idx}/graph_avg_degree": metrics["average_degree"],
+                            f"phase_{phase_idx}/graph_avg_shortest_path": metrics[
+                                "average_shortest_path_length"
+                            ],
+                            f"phase_{phase_idx}/graph_modularity": metrics["modularity"],
+                            f"phase_{phase_idx}/graph_avg_clustering": metrics[
+                                "average_clustering"
+                            ],
+                            f"phase_{phase_idx}/graph_num_communities": metrics["num_communities"],
+                            f"phase_{phase_idx}/graph_gcc_ratio": metrics["gcc_ratio"],
+                        }
+                    )
+                except Exception as e:
+                    logging.warning(f"Failed to log graph metrics to WandB: {e}")
+
+            # Save to history for JSON export
+            graph_epoch_metrics = {
+                "epoch": self.epoch,
+                "phase": phase_idx,
+                "snapshot": snapshot_idx,
+                "set": "GRAPH_METRICS",
+                "timestamp": datetime.datetime.now().isoformat(),
+                "metrics": metrics,
+            }
+            self.metrics_history.append(graph_epoch_metrics)
+            self._save_metrics_json()
+
+            # Note: We do NOT clear the buffers here
+            # The trainer needs them in _save_phase_graphs to save graph files
+            # Buffers will be automatically cleared at the start of the next TEST epoch
+
+            return metrics
+
+        except Exception as e:
+            logging.error(f"Failed to compute graph metrics: {e}")
+            return {}
+
+    def log_graph_metrics_table(
+        self, metrics: Dict[str, float], phase_idx: int, snapshot_idx: int
+    ) -> None:
+        """Log graph metrics as ASCII table to console."""
+        headers = [
+            "Avg Degree",
+            "Avg Short Path",
+            "Modularity",
+            "Avg Cluster",
+            "Communities",
+            "GCC Ratio",
+        ]
+
+        gcc_ratio = (
+            metrics["gcc_size"] / metrics["total_nodes"] if metrics["total_nodes"] > 0 else 0
+        )
+
+        values = [
+            f"{metrics['average_degree']:.4f}",
+            f"{metrics['average_shortest_path_length']:.4f}"
+            if metrics["average_shortest_path_length"] is not None
+            else "N/A",
+            f"{metrics['modularity']:.4f}" if metrics["modularity"] is not None else "N/A",
+            f"{metrics['average_clustering']:.4f}",
+            str(metrics["num_communities"]),
+            f"{gcc_ratio:.4f}",
+        ]
+
+        table = format_table(
+            headers, [values], title=f"Graph Metrics | Phase {phase_idx} | Snapshot {snapshot_idx}"
+        )
+        logging.info(f"\n{table}")
 
     def _save_metrics_json(self):
         """Save accumulated metrics to JSON file."""

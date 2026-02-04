@@ -5,6 +5,7 @@ Handles the training, validation, and evaluation loops for temporal graph learni
 
 import gc
 import os
+from pathlib import Path
 import time
 from types import SimpleNamespace
 
@@ -89,7 +90,6 @@ class Trainer:
         self.tr_step = 0
         best_eval_valid = 0
         eval_valid = 0
-        epochs_without_impr = 0
 
         for e in range(self.args.num_epochs):
             # Set models to training mode
@@ -104,10 +104,9 @@ class Trainer:
                 eval_valid, _ = self.run_epoch(self.splitter.dev, e, "VALID", grad=False)
                 if eval_valid > best_eval_valid:
                     best_eval_valid = eval_valid
-                    epochs_without_impr = 0
                     print("### w" + ") ep " + str(e) + " - Best valid measure:" + str(eval_valid))
 
-            if len(self.splitter.test) > 0 and eval_valid == best_eval_valid:
+            if len(self.splitter.test) > 0:
                 # Set models to evaluation mode
                 self.gcn.eval()
                 self.classifier.eval()
@@ -395,23 +394,27 @@ class Trainer:
             # Save checkpoint after each phase
             log_dir = getattr(self.args, "log_dir", "log/")
             checkpoint_path = os.path.join(log_dir, f"checkpoint_phase_{phase_idx}.pth.tar")
-            torch.save(
-                {
-                    "phase": phase_idx,
-                    "phase_desc": phase_desc,
-                    "gcn_dict": self.gcn.state_dict(),
-                    "classifier_dict": self.classifier.state_dict(),
-                    "gcn_optimizer": self.gcn_opt.state_dict(),
-                    "classifier_optimizer": self.classifier_opt.state_dict(),
-                    "results": phase_results,
-                },
-                checkpoint_path,
-            )
+
+            # Prepare checkpoint with graph metrics if available
+            checkpoint_data = {
+                "phase": phase_idx,
+                "phase_desc": phase_desc,
+                "gcn_dict": self.gcn.state_dict(),
+                "classifier_dict": self.classifier.state_dict(),
+                "gcn_optimizer": self.gcn_opt.state_dict(),
+                "classifier_optimizer": self.classifier_opt.state_dict(),
+                "results": phase_results,
+            }
+
+            # Include graph metrics in checkpoint if available
+            if "graph_metrics" in phase_results:
+                checkpoint_data["graph_metrics"] = phase_results["graph_metrics"]
+
+            torch.save(checkpoint_data, checkpoint_path)
             print(f"Checkpoint saved: {checkpoint_path}")
 
         # Print summary of all phases
         self._print_incremental_summary(all_results)
-
         return all_results
 
     def _run_incremental_phase(
@@ -488,7 +491,160 @@ class Trainer:
         print(f"\n[{phase_desc}] completed:")
         print(f"  Best test metric: {best_eval_test:.4f} at epoch {best_epoch}")
 
+        # Compute and save graph structure metrics at the end of the phase
+        # This captures the properties of the predicted graph from the last epoch
+        print(f"\n  Computing graph structure metrics for {phase_desc}...")
+        try:
+            # Determine which snapshot we're testing on
+            # In incremental training, we test on snapshot (phase_idx + 1)
+            test_snapshot_idx = phase_idx + 1
+
+            # Compute graph metrics using accumulated predictions from logger
+            # These predictions come from the TEST epoch of the last training epoch
+            graph_metrics = self.logger.compute_and_log_phase_graph_metrics(
+                num_nodes=self.num_nodes, phase_idx=phase_idx, snapshot_idx=test_snapshot_idx
+            )
+
+            # Add to phase results for checkpoint saving
+            phase_results["graph_metrics"] = graph_metrics
+
+            # Save graph files if metrics were computed successfully
+            if graph_metrics:
+                self._save_phase_graphs(
+                    phase_idx=phase_idx,
+                    phase_desc=phase_desc,
+                    snapshot_idx=test_snapshot_idx,
+                    graph_metrics=graph_metrics,
+                )
+                print(f"  ✓ Graph metrics and files saved successfully")
+            else:
+                print(f"  ⚠ No graph metrics computed (no predictions accumulated)")
+
+        except Exception as e:
+            print(f"  ⚠ Warning: Could not compute or save graph metrics: {e}")
+            phase_results["graph_metrics"] = {}
+
         return phase_results
+
+    def _save_phase_graphs(
+        self, phase_idx: int, phase_desc: str, snapshot_idx: int, graph_metrics: dict
+    ) -> None:
+        """Save the predicted graph from this phase in multiple formats.
+
+        This method saves the predicted social network graph at the end of each
+        training phase. It creates:
+        - .edg file: Simple edge list in X Y format (X follows Y)
+        - .graphml file: Rich XML format with probabilities and communities
+        - .png file: Visualization of the Giant Connected Component
+
+        Args:
+            phase_idx: Current phase index (training on snapshots 0..phase_idx)
+            phase_desc: Human-readable description of the phase
+            snapshot_idx: Index of the snapshot being tested (phase_idx + 1)
+            graph_metrics: Dictionary containing computed graph metrics
+
+        Output Structure:
+            graphs/
+            └── phase_{phase_idx}_snapshot_{snapshot_idx}/
+                ├── predicted_graph.edg          # Edge list X→Y
+                ├── predicted_graph.graphml      # XML with metadata
+                └── gcc_visualization.png        # GCC plot
+        """
+        # Create directory structure
+        # Using Path for cross-platform compatibility
+        graphs_dir = Path("graphs") / f"phase_{phase_idx}_snapshot_{snapshot_idx}"
+        graphs_dir.mkdir(parents=True, exist_ok=True)
+
+        # Import graph_metrics module
+        # Import here to avoid circular imports at module level
+        try:
+            import graph_metrics as gm
+        except ImportError:
+            import sys
+
+            sys.path.insert(0, str(Path(__file__).parent))
+            import graph_metrics as gm
+
+        # Reconstruct graph from accumulated predictions in logger
+        # These predictions were accumulated during the TEST epochs of this phase
+        if hasattr(self.logger, "pred_edges_idx") and len(self.logger.pred_edges_idx) > 0:
+            # Concatenate all accumulated edge predictions
+            # Each minibatch contributed its predictions during log_minibatch()
+            all_edge_idx = torch.cat(self.logger.pred_edges_idx, dim=1)  # Shape: [2, total_edges]
+            all_edge_vals = torch.cat(self.logger.pred_edges_vals, dim=0)  # Shape: [total_edges]
+            all_edge_probs = torch.cat(self.logger.pred_edge_probs, dim=0)  # Shape: [total_edges]
+
+            # Create NetworkX directed graph from predictions
+            # This represents the "X follows Y" social network structure
+            G = gm.GraphMetricsCalculator.predictions_to_graph(
+                all_edge_idx, all_edge_vals, self.num_nodes, threshold=0.5
+            )
+
+            # Detect communities using Louvain algorithm
+            # Same algorithm and seed (42) as used in compute_all_metrics
+            from networkx.algorithms import community as nx_community
+
+            G_undirected = G.to_undirected()
+            communities_list = nx_community.louvain_communities(G_undirected, seed=42)
+
+            # Create node-to-community mapping for visualization
+            node_community = {}
+            for comm_id, comm_nodes in enumerate(communities_list):
+                for node in comm_nodes:
+                    node_community[node] = comm_id
+
+            # Create edge probability mapping
+            # This stores the model's confidence for each predicted link
+            edge_prob_dict = {}
+            for i in range(all_edge_idx.shape[1]):
+                source = int(all_edge_idx[0, i])
+                target = int(all_edge_idx[1, i])
+                prob = float(all_edge_probs[i])
+                edge_prob_dict[(source, target)] = prob
+
+            # Save .edg file (directed: X follows Y)
+            # Simple format compatible with existing project .edg files
+            edg_path = graphs_dir / "predicted_graph.edg"
+            gm.GraphMetricsCalculator.save_graph_edg(G, str(edg_path))
+            print(f"    Saved edge list: {edg_path}")
+
+            # Save .graphml with probabilities and communities
+            # Rich format for analysis in Gephi, Cytoscape, etc.
+            graphml_path = graphs_dir / "predicted_graph.graphml"
+            phase_info = {
+                "phase": phase_idx,
+                "phase_desc": phase_desc,
+                "snapshot": snapshot_idx,
+                "avg_degree": graph_metrics.get("average_degree", 0),
+                "modularity": graph_metrics.get("modularity", 0),
+                "num_communities": graph_metrics.get("num_communities", 0),
+                "avg_shortest_path": graph_metrics.get("average_shortest_path_length", 0),
+                "avg_clustering": graph_metrics.get("average_clustering", 0),
+                "gcc_size": graph_metrics.get("gcc_size", 0),
+                "total_nodes": graph_metrics.get("total_nodes", 0),
+            }
+            gm.GraphMetricsCalculator.save_graph_graphml(
+                G, edge_prob_dict, node_community, str(graphml_path), phase_info
+            )
+            print(f"    Saved GraphML: {graphml_path}")
+
+            # Save visualization of GCC
+            # Visual representation with community colors
+            viz_path = graphs_dir / "gcc_visualization.png"
+            title = (
+                f"Phase {phase_idx} - GCC (Snapshot {snapshot_idx})\n"
+                f"{graph_metrics.get('num_communities', 0)} communities, "
+                f"modularity={graph_metrics.get('modularity', 0):.3f}"
+            )
+            gm.GraphMetricsCalculator.visualize_gcc(G, node_community, str(viz_path), title)
+            print(f"    Saved visualization: {viz_path}")
+
+            print(f"\n  Graph files saved to: {graphs_dir}")
+            print(f"    - {edg_path.name} (edge list)")
+            print(f"    - {graphml_path.name} (XML with metadata)")
+            print(f"    - {viz_path.name} (GCC visualization)")
+        else:
+            print(f"  ⚠ No predictions accumulated, skipping graph file generation")
 
     def _print_incremental_summary(self, all_results: list) -> None:
         """Print a summary of all incremental training phases.
@@ -496,8 +652,11 @@ class Trainer:
         Args:
             all_results: List of results from each phase.
         """
-        print("SUMMARY")
+        print("\n" + "=" * 80)
+        print("SUMMARY OF ALL INCREMENTAL TRAINING PHASES")
+        print("=" * 80)
 
+        # Standard metrics summary
         for result in all_results:
             phase_type = "Initial Training" if result["is_initial"] else "Fine-tuning"
             phase_desc = result.get("phase_desc", f"Phase {result['phase_idx']}")
@@ -508,10 +667,100 @@ class Trainer:
 
         # Calculate average performance across all test phases
         test_metrics = [r["best_test_metric"] for r in all_results]
-        print(f"\n{'=' * 60}")
-        print(f"Overall Statistics:")
-        print(f"  Average Test Metric: {np.mean(test_metrics):.4f}")
-        print(f"  Std Test Metric: {np.std(test_metrics):.4f}")
-        print(f"  Min Test Metric: {np.min(test_metrics):.4f}")
-        print(f"  Max Test Metric: {np.max(test_metrics):.4f}")
-        print(f"{'=' * 60}\n")
+        print(f"\n{'=' * 80}")
+        print(f"Overall Test Performance:")
+        print(f"  Average: {np.mean(test_metrics):.4f}")
+        print(f"  Std Dev: {np.std(test_metrics):.4f}")
+        print(f"  Min: {np.min(test_metrics):.4f}")
+        print(f"  Max: {np.max(test_metrics):.4f}")
+
+        # NEW: Graph structure metrics summary table
+        # Display metrics across all phases for comparison
+        phases_with_graph_metrics = [r for r in all_results if r.get("graph_metrics")]
+
+        if phases_with_graph_metrics:
+            print(f"\n{'=' * 80}")
+            print("GRAPH STRUCTURE METRICS ACROSS PHASES")
+            print("=" * 80)
+            print("\nThese metrics characterize the predicted social network structure")
+            print("at the end of each training phase (computed on TEST snapshot):\n")
+
+            # Create table headers
+            headers = [
+                "Phase",
+                "Snapshot",
+                "Avg Degree",
+                "Avg Path",
+                "Modularity",
+                "Avg Cluster",
+                "Communities",
+                "GCC Ratio",
+            ]
+
+            # Build rows for each phase
+            rows = []
+            for result in phases_with_graph_metrics:
+                phase_idx = result["phase_idx"]
+                snapshot_idx = phase_idx + 1  # We test on snapshot i+1
+                gm = result["graph_metrics"]
+
+                # GCC ratio shows what fraction of nodes are in the main component
+                gcc_ratio = gm.get("gcc_size", 0) / gm.get("total_nodes", 1)
+
+                # Format values (handle None for shortest path and modularity)
+                avg_path = (
+                    f"{gm.get('average_shortest_path_length', 0):.2f}"
+                    if gm.get("average_shortest_path_length") is not None
+                    else "N/A"
+                )
+                modularity = (
+                    f"{gm.get('modularity', 0):.3f}" if gm.get("modularity") is not None else "N/A"
+                )
+
+                rows.append(
+                    [
+                        phase_idx,
+                        snapshot_idx,
+                        f"{gm.get('average_degree', 0):.2f}",
+                        avg_path,
+                        modularity,
+                        f"{gm.get('average_clustering', 0):.3f}",
+                        gm.get("num_communities", 0),
+                        f"{gcc_ratio:.1%}",
+                    ]
+                )
+
+            # Print simple ASCII table
+            col_widths = [
+                max(len(str(row[i])) for row in [headers] + rows) + 2 for i in range(len(headers))
+            ]
+
+            # Print header
+            header_line = " | ".join(h.center(col_widths[i]) for i, h in enumerate(headers))
+            print(header_line)
+            print("-" * len(header_line))
+
+            # Print rows
+            for row in rows:
+                row_line = " | ".join(
+                    str(cell).center(col_widths[i]) for i, cell in enumerate(row)
+                )
+                print(row_line)
+
+            print(f"\nMetrics explanation:")
+            print(f"  • Avg Degree: Average connections per node")
+            print(f"  • Avg Path: Average shortest path length in GCC")
+            print(f"  • Modularity: Community structure strength (0=random, >0.3=communities)")
+            print(f"  • Avg Cluster: Local clustering coefficient (triadic closure)")
+            print(f"  • Communities: Number of detected communities")
+            print(f"  • GCC Ratio: Fraction of nodes in Giant Connected Component")
+
+            print(f"\nGraph files saved in: graphs/phase_{{i}}_snapshot_{{i+1}}/")
+            print(
+                f"  Each directory contains: .edg (edge list), .graphml (XML), .png (visualization)"
+            )
+        else:
+            print(f"\n{'=' * 80}")
+            print("No graph structure metrics available (possibly due to errors)")
+
+        print(f"{'=' * 80}\n")

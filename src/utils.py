@@ -3,8 +3,6 @@
 Taken from: https://github.com/IBM/EvolveGCN/blob/master/utils.py
 """
 
-from types import SimpleNamespace
-
 import torch
 import yaml
 

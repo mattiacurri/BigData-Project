@@ -218,3 +218,5 @@ cython_debug/
 notebook_outputs/
 log/
 scripts/
+wandb/
+graphs/

@@ -9,8 +9,6 @@ from types import SimpleNamespace
 import numpy as np
 import torch
 
-import utils as u
-
 ECOLS = SimpleNamespace(source=0, target=1, time=2)
 
 

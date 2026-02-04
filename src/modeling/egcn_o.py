@@ -18,8 +18,6 @@ import torch
 import torch.nn as nn
 from torch.nn.parameter import Parameter
 
-import utils as u
-
 
 class EGCN(torch.nn.Module):
     """Evolving Graph Convolutional Network (Output variant)."""
