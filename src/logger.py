@@ -220,8 +220,9 @@ class Logger:
         self.phase_desc = phase_desc
         if wandb.run:
             try:
-                # Use config/summary to store phase info (not as time-series metric)
-                wandb.config.update({"phase_idx": phase_idx, "phase_desc": phase_desc})
+                # Log phase info as summary (can change over time) instead of config
+                wandb.summary["phase_idx"] = phase_idx
+                wandb.summary["phase_desc"] = phase_desc
             except Exception as e:
                 logging.warning(f"Failed to log phase to WandB: {e}")
 
@@ -418,29 +419,14 @@ class Logger:
         self.losses = torch.stack(self.losses)
         mean_loss = float(self.losses.mean())
 
-        if self.args.target_measure == "loss" or self.args.target_measure == "Loss":
-            eval_measure = mean_loss
-
+        # Calculate all metrics
         epoch_error = self.calc_epoch_metric(self.batch_sizes, self.errors)
         epoch_MRR = self.calc_epoch_metric(self.batch_sizes, self.MRRs)
         epoch_MAP = self.calc_epoch_metric(self.batch_sizes, self.MAPs)
 
-        if self.args.target_measure == "MRR" or self.args.target_measure == "mrr":
-            eval_measure = epoch_MRR
-        if self.args.target_measure == "MAP" or self.args.target_measure == "map":
-            eval_measure = epoch_MAP
-
         micro_precision, micro_recall, micro_f1 = self.calc_microavg_eval_measures(
             self.conf_mat_tp, self.conf_mat_fn, self.conf_mat_fp
         )
-
-        if str(self.args.target_class) == "AVG":
-            if self.args.target_measure == "Precision" or self.args.target_measure == "prec":
-                eval_measure = micro_precision
-            elif self.args.target_measure == "Recall" or self.args.target_measure == "rec":
-                eval_measure = micro_recall
-            else:
-                eval_measure = micro_f1
 
         # Calculate per-class metrics
         class_metrics = {}
@@ -449,13 +435,36 @@ class Logger:
                 self.conf_mat_tp, self.conf_mat_fn, self.conf_mat_fp, cl
             )
             class_metrics[cl] = {"precision": cl_precision, "recall": cl_recall, "f1": cl_f1}
-            if str(cl) == str(self.args.target_class):
-                if self.args.target_measure == "Precision" or self.args.target_measure == "prec":
-                    eval_measure = cl_precision
-                elif self.args.target_measure == "Recall" or self.args.target_measure == "rec":
-                    eval_measure = cl_recall
-                else:
-                    eval_measure = cl_f1
+
+        # Simple logic: choose metric based on target_measure
+        target = self.args.target_measure.lower()
+
+        if target == "loss":
+            eval_measure = mean_loss
+        elif target == "mrr":
+            eval_measure = epoch_MRR
+        elif target == "map":
+            eval_measure = epoch_MAP
+        elif target in ["precision", "prec"]:
+            if str(self.args.target_class) == "AVG":
+                eval_measure = micro_precision
+            else:
+                eval_measure = class_metrics[int(self.args.target_class)]["precision"]
+        elif target in ["recall", "rec"]:
+            if str(self.args.target_class) == "AVG":
+                eval_measure = micro_recall
+            else:
+                eval_measure = class_metrics[int(self.args.target_class)]["recall"]
+        elif target == "f1":
+            if str(self.args.target_class) == "AVG":
+                eval_measure = micro_f1
+            else:
+                eval_measure = class_metrics[int(self.args.target_class)]["f1"]
+        else:
+            raise ValueError(
+                f"Unknown target_measure: '{self.args.target_measure}'. "
+                f"Must be one of: loss, mrr, map, precision/prec, recall/rec, f1"
+            )
 
         # Calculate macro-averaged metrics
         macro_precision = sum(m["precision"] for m in class_metrics.values()) / self.num_classes
@@ -613,19 +622,19 @@ class Logger:
             # Log to WandB
             if wandb.run:
                 try:
+                    # Use phase_idx as step to aggregate metrics across phases
+                    # This allows easy comparison of graph metrics across all phases
                     wandb.log(
                         {
-                            f"phase_{phase_idx}/graph_avg_degree": metrics["average_degree"],
-                            f"phase_{phase_idx}/graph_avg_shortest_path": metrics[
-                                "average_shortest_path_length"
-                            ],
-                            f"phase_{phase_idx}/graph_modularity": metrics["modularity"],
-                            f"phase_{phase_idx}/graph_avg_clustering": metrics[
-                                "average_clustering"
-                            ],
-                            f"phase_{phase_idx}/graph_num_communities": metrics["num_communities"],
-                            f"phase_{phase_idx}/graph_gcc_ratio": metrics["gcc_ratio"],
-                        }
+                            "graph/avg_degree": metrics["average_degree"],
+                            "graph/avg_shortest_path": metrics["average_shortest_path_length"],
+                            "graph/modularity": metrics["modularity"],
+                            "graph/avg_clustering": metrics["average_clustering"],
+                            "graph/num_communities": metrics["num_communities"],
+                            "graph/gcc_ratio": metrics["gcc_ratio"],
+                            "graph/phase": phase_idx,  # For tracking which phase this is
+                        },
+                        step=phase_idx,
                     )
                 except Exception as e:
                     logging.warning(f"Failed to log graph metrics to WandB: {e}")

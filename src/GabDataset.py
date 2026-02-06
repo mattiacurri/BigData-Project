@@ -44,11 +44,9 @@ class GabDataset:
         self.args_gab = args.gab_args
 
         # Compute nodes per snapshot for incremental learning
-        # timesteps = u.aggregate_by_time(edges[:, self.ecols.TimeStep], args.gab_args.aggr_time)
         timesteps = edges[:, self.ecols.TimeStep]  # Usa timestamp originali senza aggregazione
         self.max_time = timesteps.max()
         self.min_time = timesteps.min()
-        # edges[:, self.ecols.TimeStep] = timesteps  # Non necessario se non modifichiamo
 
         # Track which nodes appear in each snapshot (for incremental learning)
         self._compute_nodes_per_snapshot(
@@ -96,13 +94,6 @@ class GabDataset:
         # Cache for temporal node features (snapshot -> tensor)
         self._temporal_features_cache: Dict[int, torch.Tensor] = {}
 
-        print(f"Features per node: {self.feats_per_node}")
-        print(f"Number of nodes (total across all snapshots): {self.num_nodes}")
-        print(
-            f"Nodes per snapshot: {[len(nodes) for nodes in self.cumulative_nodes_per_snapshot.values()]}"
-        )
-        print(f"Post-to-snapshot mappings: {len(self.post_to_snapshot)}")
-
     def _load_all_snapshots(self) -> pd.DataFrame:
         """Load edges from all snapshots.
 
@@ -142,7 +133,6 @@ class GabDataset:
             raise ValueError("No edge files found in the data folder")
 
         edges_df = pd.concat(all_edges, ignore_index=True)
-        print(f"\nTotal edges loaded: {len(edges_df)} from {len(all_edges)} snapshots")
 
         return edges_df
 

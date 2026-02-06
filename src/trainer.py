@@ -379,6 +379,26 @@ class Trainer:
                 print(f"{phase_desc} (Initial Training)")
             else:
                 print(f"{phase_desc} (Fine-tuning)")
+                # Load best checkpoint from previous phase before fine-tuning
+                # This ensures we start from the best epoch based on target metric (MAP)
+                prev_phase = phase_idx - 1
+                best_checkpoint_path = os.path.join(
+                    getattr(self.args, "log_dir", "log/"),
+                    f"checkpoint_phase_{prev_phase}_best.pth.tar",
+                )
+                if os.path.isfile(best_checkpoint_path):
+                    print(f"\n  Loading best checkpoint from phase {prev_phase}...")
+                    checkpoint = torch.load(best_checkpoint_path, map_location=self.args.device)
+                    self.gcn.load_state_dict(checkpoint["gcn_dict"])
+                    self.classifier.load_state_dict(checkpoint["classifier_dict"])
+                    self.gcn_opt.load_state_dict(checkpoint["gcn_optimizer"])
+                    self.classifier_opt.load_state_dict(checkpoint["classifier_optimizer"])
+                    print(
+                        f"  ✓ Loaded from epoch {checkpoint['epoch']} with metric {checkpoint['best_test_metric']:.4f}"
+                    )
+                else:
+                    print(f"  ⚠ Warning: Best checkpoint not found at {best_checkpoint_path}")
+                    print(f"     Continuing with current model state...")
             print(f"{'=' * 60}\n")
 
             phase_results = self._run_incremental_phase(
@@ -391,27 +411,8 @@ class Trainer:
 
             all_results.append(phase_results)
 
-            # Save checkpoint after each phase
-            log_dir = getattr(self.args, "log_dir", "log/")
-            checkpoint_path = os.path.join(log_dir, f"checkpoint_phase_{phase_idx}.pth.tar")
-
-            # Prepare checkpoint with graph metrics if available
-            checkpoint_data = {
-                "phase": phase_idx,
-                "phase_desc": phase_desc,
-                "gcn_dict": self.gcn.state_dict(),
-                "classifier_dict": self.classifier.state_dict(),
-                "gcn_optimizer": self.gcn_opt.state_dict(),
-                "classifier_optimizer": self.classifier_opt.state_dict(),
-                "results": phase_results,
-            }
-
-            # Include graph metrics in checkpoint if available
-            if "graph_metrics" in phase_results:
-                checkpoint_data["graph_metrics"] = phase_results["graph_metrics"]
-
-            torch.save(checkpoint_data, checkpoint_path)
-            print(f"Checkpoint saved: {checkpoint_path}")
+            # Note: Best checkpoint is saved during training when best metric is achieved
+            # See _run_incremental_phase() where checkpoint_phase_{phase_idx}_best.pth.tar is saved
 
         # Print summary of all phases
         self._print_incremental_summary(all_results)
@@ -481,47 +482,73 @@ class Trainer:
                 best_eval_test = eval_test
                 best_epoch = e
                 epochs_without_impr = 0
-                print(f"  -> New best test metric: {best_eval_test:.4f}")
+                target_measure = getattr(self.args, "target_measure", "metric")
+                print(f"  -> New best test {target_measure}: {best_eval_test:.4f}")
+
+                # Save checkpoint with the BEST model state (not the last one)
+                # This ensures we can resume from the best epoch based on target metric (e.g., MAP)
+                log_dir = getattr(self.args, "log_dir", "log/")
+                checkpoint_path = os.path.join(
+                    log_dir, f"checkpoint_phase_{phase_idx}_best.pth.tar"
+                )
+
+                checkpoint_data = {
+                    "phase": phase_idx,
+                    "phase_desc": phase_desc,
+                    "epoch": best_epoch,
+                    "best_test_metric": best_eval_test,
+                    "target_measure": target_measure,
+                    "gcn_dict": self.gcn.state_dict(),
+                    "classifier_dict": self.classifier.state_dict(),
+                    "gcn_optimizer": self.gcn_opt.state_dict(),
+                    "classifier_optimizer": self.classifier_opt.state_dict(),
+                }
+                torch.save(checkpoint_data, checkpoint_path)
+                print(f"     ✓ Best checkpoint saved (epoch {best_epoch})")
             else:
                 epochs_without_impr += 1
 
         phase_results["best_test_metric"] = best_eval_test
         phase_results["best_epoch"] = best_epoch
 
+        target_measure = getattr(self.args, "target_measure", "metric")
         print(f"\n[{phase_desc}] completed:")
-        print(f"  Best test metric: {best_eval_test:.4f} at epoch {best_epoch}")
+        print(f"  Best test {target_measure}: {best_eval_test:.4f} at epoch {best_epoch}")
 
-        # Compute and save graph structure metrics at the end of the phase
+        # Compute and save graph structure metrics at the end of the phase (if enabled)
         # This captures the properties of the predicted graph from the last epoch
-        print(f"\n  Computing graph structure metrics for {phase_desc}...")
-        try:
-            # Determine which snapshot we're testing on
-            # In incremental training, we test on snapshot (phase_idx + 1)
-            test_snapshot_idx = phase_idx + 1
+        if not getattr(self.args, "no_graph_metrics", False):
+            print(f"\n  Computing graph structure metrics for {phase_desc}...")
+            try:
+                # Determine which snapshot we're testing on
+                # In incremental training, we test on snapshot (phase_idx + 1)
+                test_snapshot_idx = phase_idx + 1
 
-            # Compute graph metrics using accumulated predictions from logger
-            # These predictions come from the TEST epoch of the last training epoch
-            graph_metrics = self.logger.compute_and_log_phase_graph_metrics(
-                num_nodes=self.num_nodes, phase_idx=phase_idx, snapshot_idx=test_snapshot_idx
-            )
-
-            # Add to phase results for checkpoint saving
-            phase_results["graph_metrics"] = graph_metrics
-
-            # Save graph files if metrics were computed successfully
-            if graph_metrics:
-                self._save_phase_graphs(
-                    phase_idx=phase_idx,
-                    phase_desc=phase_desc,
-                    snapshot_idx=test_snapshot_idx,
-                    graph_metrics=graph_metrics,
+                # Compute graph metrics using accumulated predictions from logger
+                # These predictions come from the TEST epoch of the last training epoch
+                graph_metrics = self.logger.compute_and_log_phase_graph_metrics(
+                    num_nodes=self.num_nodes, phase_idx=phase_idx, snapshot_idx=test_snapshot_idx
                 )
-                print(f"  ✓ Graph metrics and files saved successfully")
-            else:
-                print(f"  ⚠ No graph metrics computed (no predictions accumulated)")
 
-        except Exception as e:
-            print(f"  ⚠ Warning: Could not compute or save graph metrics: {e}")
+                # Add to phase results for checkpoint saving
+                phase_results["graph_metrics"] = graph_metrics
+
+                # Save graph files if metrics were computed successfully
+                if graph_metrics:
+                    self._save_phase_graphs(
+                        phase_idx=phase_idx,
+                        phase_desc=phase_desc,
+                        snapshot_idx=test_snapshot_idx,
+                        graph_metrics=graph_metrics,
+                    )
+                    print(f"  ✓ Graph metrics and files saved successfully")
+                else:
+                    print(f"  ⚠ No graph metrics computed (no predictions accumulated)")
+
+            except Exception as e:
+                print(f"  ⚠ Warning: Could not compute or save graph metrics: {e}")
+                phase_results["graph_metrics"] = {}
+        else:
             phase_results["graph_metrics"] = {}
 
         return phase_results
@@ -628,21 +655,25 @@ class Trainer:
             )
             print(f"    Saved GraphML: {graphml_path}")
 
-            # Save visualization of GCC
+            # Save visualization of GCC (optional, can be disabled with --no-graph-viz)
             # Visual representation with community colors
             viz_path = graphs_dir / "gcc_visualization.png"
-            title = (
-                f"Phase {phase_idx} - GCC (Snapshot {snapshot_idx})\n"
-                f"{graph_metrics.get('num_communities', 0)} communities, "
-                f"modularity={graph_metrics.get('modularity', 0):.3f}"
-            )
-            gm.GraphMetricsCalculator.visualize_gcc(G, node_community, str(viz_path), title)
-            print(f"    Saved visualization: {viz_path}")
+            if not getattr(self.args, "no_graph_viz", False):
+                title = (
+                    f"Phase {phase_idx} - GCC (Snapshot {snapshot_idx})\n"
+                    f"{graph_metrics.get('num_communities', 0)} communities, "
+                    f"modularity={graph_metrics.get('modularity', 0):.3f}"
+                )
+                gm.GraphMetricsCalculator.visualize_gcc(G, node_community, str(viz_path), title)
+                print(f"    Saved visualization: {viz_path}")
+            else:
+                print(f"    ⏩ Skipped visualization (disabled with --no-graph-viz)")
 
             print(f"\n  Graph files saved to: {graphs_dir}")
             print(f"    - {edg_path.name} (edge list)")
             print(f"    - {graphml_path.name} (XML with metadata)")
-            print(f"    - {viz_path.name} (GCC visualization)")
+            if not getattr(self.args, "no_graph_viz", False):
+                print(f"    - {viz_path.name} (GCC visualization)")
         else:
             print(f"  ⚠ No predictions accumulated, skipping graph file generation")
 
@@ -747,13 +778,13 @@ class Trainer:
                 )
                 print(row_line)
 
-            print(f"\nMetrics explanation:")
-            print(f"  • Avg Degree: Average connections per node")
-            print(f"  • Avg Path: Average shortest path length in GCC")
-            print(f"  • Modularity: Community structure strength (0=random, >0.3=communities)")
-            print(f"  • Avg Cluster: Local clustering coefficient (triadic closure)")
-            print(f"  • Communities: Number of detected communities")
-            print(f"  • GCC Ratio: Fraction of nodes in Giant Connected Component")
+            # print(f"\nMetrics explanation:")
+            # print(f"  • Avg Degree: Average connections per node")
+            # print(f"  • Avg Path: Average shortest path length in GCC")
+            # print(f"  • Modularity: Community structure strength (0=random, >0.3=communities)")
+            # print(f"  • Avg Cluster: Local clustering coefficient (triadic closure)")
+            # print(f"  • Communities: Number of detected communities")
+            # print(f"  • GCC Ratio: Fraction of nodes in Giant Connected Component")
 
             print(f"\nGraph files saved in: graphs/phase_{{i}}_snapshot_{{i+1}}/")
             print(
@@ -761,6 +792,6 @@ class Trainer:
             )
         else:
             print(f"\n{'=' * 80}")
-            print("No graph structure metrics available (possibly due to errors)")
+            print("No graph structure metrics available")
 
         print(f"{'=' * 80}\n")
