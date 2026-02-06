@@ -35,6 +35,18 @@ if __name__ == "__main__":
         type=argparse.FileType(mode="r"),
         help="optional, yaml file containing parameters to be used, overrides command line parameters",
     )
+    parser.add_argument(
+        "--no-graph-viz",
+        action="store_true",
+        default=False,
+        help="Disable graph visualization PNG generation (saves time on large graphs)",
+    )
+    parser.add_argument(
+        "--no-graph-metrics",
+        action="store_true",
+        default=False,
+        help="Disable graph structure metrics computation (saves time and memory)",
+    )
     args = u.parse_args(parser)
 
     args.use_cuda = torch.cuda.is_available() and args.use_cuda
@@ -85,13 +97,10 @@ if __name__ == "__main__":
 
     # Classifier Head
     # 2 -> num_classes for link prediction
-    # For EGCN models, use layer_2_feats; for LSTM-based models, use lstm_l2_feats
+    # For EGCN models, use layer_2_feats
     if args.model in ["egcn_h", "egcn_o"]:
         gcn_output_dim = args.gcn_parameters["layer_2_feats"]
         print(f"Using EGCN model with output dimension: {gcn_output_dim}")
-    else:
-        gcn_output_dim = args.gcn_parameters["lstm_l2_feats"]
-        print(f"Using LSTM-based model with output dimension: {gcn_output_dim}")
 
     print(f"Classifier input dimension (2*output_dim): {gcn_output_dim * 2}")
     classifier = ClassifierHead.MLP(args, in_features=gcn_output_dim * 2).to(args.device)
