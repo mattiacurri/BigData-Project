@@ -352,7 +352,7 @@ class LinkPrediction:
         #     print(f"  Filter edges (from previous snapshot): {num_filter:,}")
         #     if num_filter > 0:
         #         print(
-        #             f"  → These {num_filter:,} edges from training will be excluded from MRR ranking"
+        #             f"  → These {num_filter:,} edges from training will be excluded from ranking"
         #         )
         #     print(f"{'=' * 70}\n")
 

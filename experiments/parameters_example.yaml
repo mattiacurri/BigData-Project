@@ -22,7 +22,7 @@ learning_rate: 0.001 # use None to pick a random number between learning_rate_mi
 negative_mult_training: 1
 negative_mult_test: 1
 seed: 42
-target_measure: MAP # measure to define the best epoch F1, Precision, Recall, MRR, MAP, AUC_ROC
+target_measure: MAP # measure to define the best epoch F1, Precision, Recall, MAP, AUC_ROC
 target_class: 1 # Target class to get the measure to define the best epoch (all, 0, 1)
 reset_optimizer_on_finetune: true  # true = reset optimizer (classic fine-tuning), false = keep momentum
 

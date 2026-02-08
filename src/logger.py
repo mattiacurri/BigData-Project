@@ -1,7 +1,7 @@
 """Logger for training and evaluation metrics.
 
 Provides comprehensive logging of training progress, evaluation metrics including
-precision, recall, F1-score, MRR, MAP, and AUC-ROC across different datasets and phases.
+precision, recall, F1-score, MAP, and AUC-ROC across different datasets and phases.
 Features: colored console output, timestamps, JSON metrics export, ASCII tables.
 """
 
@@ -15,7 +15,6 @@ import time
 from types import SimpleNamespace
 from typing import Dict
 
-import numpy as np
 from sklearn.metrics import average_precision_score, roc_auc_score
 import torch
 import wandb
@@ -251,12 +250,10 @@ class Logger:
 
         self.losses = []
         self.errors = []
-        self.MRRs = []
         self.MAPs = []
         self.AUCs = []  # AUC-ROC on sampled negatives
 
-        # Track number of samples for MRR and MAP
-        self.MRR_sample_counts = []
+        # Track number of samples for MAP
         self.MAP_sample_counts = []
 
         self.conf_mat_tp = {}
@@ -318,16 +315,6 @@ class Logger:
             **kwargs: Additional arguments (e.g., adj for link prediction).
         """
         probs = torch.softmax(predictions, dim=1)[:, 1]
-        if "adj" in kwargs:
-            filter_edges = kwargs.get("filter_edges")
-            MRR = self.get_MRR(
-                probs, true_classes, kwargs["adj"], filter_edges=filter_edges, do_softmax=False
-            )
-            # Store number of samples used for MRR calculation
-            self.last_mrr_num_samples = getattr(self, "_last_mrr_samples", 0)
-        else:
-            MRR = torch.tensor([0.0])
-            self.last_mrr_num_samples = 0
 
         MAP = torch.tensor(self.get_MAP(probs, true_classes, do_softmax=False))
         # MAP is calculated on all samples
@@ -351,12 +338,10 @@ class Logger:
 
         self.losses.append(loss)
         self.errors.append(error)
-        self.MRRs.append(MRR)
         self.MAPs.append(MAP)
         self.AUCs.append(AUC)
 
-        # Track sample counts for MRR and MAP
-        self.MRR_sample_counts.append(self.last_mrr_num_samples)
+        # Track sample counts for MAP
         self.MAP_sample_counts.append(self.last_map_num_samples)
 
         for cl in range(self.num_classes):
@@ -377,7 +362,6 @@ class Logger:
 
         if self.minibatch_done % self.minibatch_log_interval == 0:
             mb_error = self.calc_epoch_metric(self.batch_sizes, self.errors)
-            mb_MRR = self.calc_epoch_metric(self.batch_sizes, self.MRRs)
             mb_MAP = self.calc_epoch_metric(self.batch_sizes, self.MAPs)
             partial_losses = torch.stack(self.losses)
             mb_loss = partial_losses.mean().item()
@@ -387,7 +371,6 @@ class Logger:
                     f"  📦 Batch {self.minibatch_done}/{self.num_minibatches} | "
                     f"Loss: {mb_loss:.4f} | "
                     f"Err: {mb_error:.4f} | "
-                    f"MRR: {mb_MRR:.4f} | "
                     f"MAP: {mb_MAP:.4f}"
                 )
 
@@ -399,7 +382,6 @@ class Logger:
                         {
                             f"{prefix}loss": mb_loss,
                             f"{prefix}error": mb_error,
-                            f"{prefix}mrr": mb_MRR,
                             f"{prefix}map": mb_MAP,
                             f"{prefix}batch": self.minibatch_done,
                         },
@@ -433,12 +415,10 @@ class Logger:
         mean_loss = float(self.losses.mean())
 
         # Calculate all metrics
-        epoch_MRR = self.calc_epoch_metric(self.batch_sizes, self.MRRs)
         epoch_MAP = self.calc_epoch_metric(self.batch_sizes, self.MAPs)
         epoch_AUC = self.calc_epoch_metric(self.batch_sizes, self.AUCs)
 
-        # Calculate total number of samples used for MRR and MAP
-        sum(self.MRR_sample_counts)
+        # Calculate total number of samples used for MAP
         total_map_samples = sum(self.MAP_sample_counts)
 
         micro_precision, micro_recall, micro_f1 = self.calc_microavg_eval_measures(
@@ -458,8 +438,6 @@ class Logger:
 
         if target == "loss":
             eval_measure = mean_loss
-        elif target == "mrr":
-            eval_measure = epoch_MRR
         elif target == "map":
             eval_measure = epoch_MAP
         elif target in ["auc", "auc_roc"]:
@@ -482,7 +460,7 @@ class Logger:
         else:
             raise ValueError(
                 f"Unknown target_measure: '{self.args.target_measure}'. "
-                f"Must be one of: loss, mrr, map, precision/prec, recall/rec, f1"
+                f"Must be one of: loss, map, precision/prec, recall/rec, f1"
             )
 
         # Calculate macro-averaged metrics
@@ -499,7 +477,6 @@ class Logger:
             "Macro Prec": f"{precision:.4f}",
             "Macro Rec": f"{recall:.4f}",
             "Macro F1": f"{f1:.4f}",
-            "MRR": f"{epoch_MRR:.4f}",
             "MAP": f"{epoch_MAP:.4f}",
             "AUC-ROC": f"{epoch_AUC:.4f}",
         }
@@ -564,7 +541,6 @@ class Logger:
                 "micro_precision": micro_precision,
                 "micro_recall": micro_recall,
                 "micro_f1": micro_f1,
-                "mrr": epoch_MRR,
                 "map": epoch_MAP,
                 "auc_roc": epoch_AUC,
             },
@@ -596,7 +572,6 @@ class Logger:
                         f"{prefix}micro_precision": micro_precision,
                         f"{prefix}micro_recall": micro_recall,
                         f"{prefix}micro_f1": micro_f1,
-                        f"{prefix}mrr": epoch_MRR,
                         f"{prefix}map": epoch_MAP,
                         f"{prefix}auc_roc": epoch_AUC,
                         # Per-class metrics
@@ -795,129 +770,6 @@ class Logger:
 
         except Exception as e:
             logging.error(f"Failed to save predictions to .edg: {e}")
-
-    def get_MRR(self, predictions, true_classes, adj, filter_edges=None, do_softmax=False):
-        """Calculate Mean Reciprocal Rank (MRR) with filtered ranking.
-
-        Ranks ONLY among actually evaluated node pairs (no dense matrix).
-        This is the standard "filtered MRR" approach used in link prediction literature.
-
-        Args:
-            predictions: Model predictions.
-            true_classes: Ground truth labels.
-            adj: Adjacency matrix indices [2, N].
-            filter_edges: Optional edges from previous snapshot to exclude from ranking (remapped).
-            do_softmax: Whether to apply softmax to predictions.
-
-        Returns:
-            Tensor: Mean Reciprocal Rank value.
-        """
-        probs = torch.softmax(predictions, dim=1)[:, 1] if do_softmax else predictions
-
-        probs = probs.detach().cpu().numpy()
-        true_classes = true_classes.detach().cpu().numpy()
-        adj = adj.detach().cpu().numpy()
-
-        # Convert filter_edges to set for fast lookup
-        filter_set = set()
-        if filter_edges is not None and filter_edges.size(0) > 0:
-            filter_edges_np = filter_edges.detach().cpu().numpy()
-            if filter_edges_np.ndim == 2 and filter_edges_np.shape[0] > 0:
-                filter_set = set(map(tuple, filter_edges_np))
-
-        # adj format is [2, N] where adj[0] = src nodes, adj[1] = dst nodes
-        # Group edges by source node
-        from collections import defaultdict
-
-        node_edges = defaultdict(list)
-
-        for i in range(adj.shape[1]):
-            src = adj[0, i]
-            dst = adj[1, i]
-            prob = probs[i]
-            label = true_classes[i]
-            is_filter = (src, dst) in filter_set
-
-            node_edges[src].append(
-                {"dst": dst, "prob": prob, "label": label, "is_filter": is_filter}
-            )
-
-        # Calculate MRR for each source node that has at least one positive edge
-        row_MRRs = []
-        for src, edges in node_edges.items():
-            # Check if this node has any positive edges
-            has_positive = any(e["label"] == 1 for e in edges)
-            if not has_positive:
-                continue
-
-            # Filter out training edges (they shouldn't be ranked)
-            edges_to_rank = [e for e in edges if not e["is_filter"]]
-
-            if len(edges_to_rank) == 0:
-                continue
-
-            # Sort by probability descending
-            edges_to_rank.sort(key=lambda e: e["prob"], reverse=True)
-
-            # Find ranks of positive edges
-            reciprocal_ranks = []
-            for rank, edge in enumerate(edges_to_rank, start=1):
-                if edge["label"] == 1:
-                    reciprocal_ranks.append(1.0 / rank)
-
-            # Average reciprocal rank for this node
-            if len(reciprocal_ranks) > 0:
-                row_MRRs.append(np.mean(reciprocal_ranks))
-
-        # Store number of samples (nodes with at least one positive edge)
-        self._last_mrr_samples = len(row_MRRs)
-
-        return torch.tensor(row_MRRs).mean() if len(row_MRRs) > 0 else torch.tensor(0.0)
-
-    def get_row_MRR(self, probs, true_classes, filter_indices=None):
-        """Calculate MRR for a single row (node) with optional filtered ranking.
-
-        Args:
-            probs: Prediction probabilities for the row.
-            true_classes: Ground truth labels for the row.
-            filter_indices: Optional array of node indices to exclude from ranking.
-
-        Returns:
-            float: MRR for this row.
-        """
-        existing_mask = true_classes == 1
-
-        # If we have filter indices, set their probabilities to -inf
-        # so they don't affect the ranking
-        probs_filtered = probs.copy()
-        if filter_indices is not None and len(filter_indices) > 0:
-            probs_filtered[filter_indices] = -np.inf
-
-        # descending in probability
-        ordered_indices = np.flip(probs_filtered.argsort())
-
-        ordered_existing_mask = existing_mask[ordered_indices]
-
-        # Count only non-filtered positions for ranking
-        # This gives the "filtered rank" where training edges don't count
-        if filter_indices is not None and len(filter_indices) > 0:
-            # Create a mask of filtered positions in the ordered list
-            filtered_mask = np.isin(ordered_indices, filter_indices)
-            # Calculate cumulative count excluding filtered positions
-            valid_positions = ~filtered_mask
-            cumsum_valid = np.cumsum(valid_positions)
-            # Ranks are 1-based
-            existing_ranks = cumsum_valid[ordered_existing_mask].astype(float)
-        else:
-            # Standard ranking without filtering
-            existing_ranks = np.arange(1, true_classes.shape[0] + 1, dtype=float)[
-                ordered_existing_mask
-            ]
-
-        if len(existing_ranks) == 0:
-            return 0.0
-
-        return (1 / existing_ranks).sum() / existing_ranks.shape[0]
 
     def get_MAP(self, predictions, true_classes, do_softmax=False):
         """Calculate Mean Average Precision (MAP).
