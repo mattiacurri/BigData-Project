@@ -421,10 +421,6 @@ class Logger:
         # Calculate total number of samples used for MAP
         total_map_samples = sum(self.MAP_sample_counts)
 
-        micro_precision, micro_recall, micro_f1 = self.calc_microavg_eval_measures(
-            self.conf_mat_tp, self.conf_mat_fn, self.conf_mat_fp
-        )
-
         # Calculate per-class metrics
         class_metrics = {}
         for cl in range(self.num_classes):
@@ -432,6 +428,11 @@ class Logger:
                 self.conf_mat_tp, self.conf_mat_fn, self.conf_mat_fp, cl
             )
             class_metrics[cl] = {"precision": cl_precision, "recall": cl_recall, "f1": cl_f1}
+
+        # Calculate macro-averaged metrics
+        macro_precision = sum(m["precision"] for m in class_metrics.values()) / self.num_classes
+        macro_recall = sum(m["recall"] for m in class_metrics.values()) / self.num_classes
+        macro_f1 = sum(m["f1"] for m in class_metrics.values()) / self.num_classes
 
         # Simple logic: choose metric based on target_measure
         target = self.args.target_measure.lower()
@@ -444,17 +445,17 @@ class Logger:
             eval_measure = epoch_AUC
         elif target in ["precision", "prec"]:
             if str(self.args.target_class) == "AVG":
-                eval_measure = micro_precision
+                eval_measure = macro_precision
             else:
                 eval_measure = class_metrics[int(self.args.target_class)]["precision"]
         elif target in ["recall", "rec"]:
             if str(self.args.target_class) == "AVG":
-                eval_measure = micro_recall
+                eval_measure = macro_recall
             else:
                 eval_measure = class_metrics[int(self.args.target_class)]["recall"]
         elif target == "f1":
             if str(self.args.target_class) == "AVG":
-                eval_measure = micro_f1
+                eval_measure = macro_f1
             else:
                 eval_measure = class_metrics[int(self.args.target_class)]["f1"]
         else:
@@ -462,11 +463,6 @@ class Logger:
                 f"Unknown target_measure: '{self.args.target_measure}'. "
                 f"Must be one of: loss, map, precision/prec, recall/rec, f1"
             )
-
-        # Calculate macro-averaged metrics
-        macro_precision = sum(m["precision"] for m in class_metrics.values()) / self.num_classes
-        macro_recall = sum(m["recall"] for m in class_metrics.values()) / self.num_classes
-        macro_f1 = sum(m["f1"] for m in class_metrics.values()) / self.num_classes
 
         # Use macro-averaged for overall metrics
         precision, recall, f1 = macro_precision, macro_recall, macro_f1
@@ -538,9 +534,6 @@ class Logger:
                 "macro_precision": precision,
                 "macro_recall": recall,
                 "macro_f1": f1,
-                "micro_precision": micro_precision,
-                "micro_recall": micro_recall,
-                "micro_f1": micro_f1,
                 "map": epoch_MAP,
                 "auc_roc": epoch_AUC,
             },
@@ -569,9 +562,6 @@ class Logger:
                         f"{prefix}macro_precision": precision,
                         f"{prefix}macro_recall": recall,
                         f"{prefix}macro_f1": f1,
-                        f"{prefix}micro_precision": micro_precision,
-                        f"{prefix}micro_recall": micro_recall,
-                        f"{prefix}micro_f1": micro_f1,
                         f"{prefix}map": epoch_MAP,
                         f"{prefix}auc_roc": epoch_AUC,
                         # Per-class metrics
@@ -897,28 +887,6 @@ class Logger:
             conf_mat_per_class.false_negatives[cl] = fn
             conf_mat_per_class.false_positives[cl] = fp
         return conf_mat_per_class
-
-    def calc_microavg_eval_measures(self, tp, fn, fp):
-        """Calculate micro-averaged precision, recall, and F1-score.
-
-        Args:
-            tp: True positives per class.
-            fn: False negatives per class.
-            fp: False positives per class.
-
-        Returns:
-            tuple: (precision, recall, F1-score)
-        """
-        tp_sum = sum(tp.values()).item()
-        fn_sum = sum(fn.values()).item()
-        fp_sum = sum(fp.values()).item()
-
-        p = 0 if tp_sum + fp_sum == 0 else tp_sum * 1.0 / (tp_sum + fp_sum)
-
-        r = 0 if tp_sum + fn_sum == 0 else tp_sum * 1.0 / (tp_sum + fn_sum)
-
-        f1 = 2.0 * (p * r) / (p + r) if p + r > 0 else 0
-        return p, r, f1
 
     def calc_eval_measures_per_class(self, tp, fn, fp, class_id):
         """Calculate precision, recall, and F1-score for a specific class.
