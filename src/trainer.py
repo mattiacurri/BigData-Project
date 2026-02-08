@@ -6,13 +6,12 @@ Handles the training, validation, and evaluation loops for temporal graph learni
 import gc
 import os
 from pathlib import Path
-import time
 from types import SimpleNamespace
 
 import numpy as np
 import pandas as pd
 import torch
-import tqdm
+from tqdm import tqdm
 
 import logger
 import utils as u
@@ -55,35 +54,45 @@ class Trainer:
                 args: Configuration namespace with learning rate.
         """
         params = self.gcn.parameters()
-        self.gcn_opt = torch.optim.Adam(params, lr=args.learning_rate)
+        self.gcn_opt = torch.optim.Adam(
+            params,
+            lr=args.learning_rate,
+            weight_decay=args.weight_decay if hasattr(args, "weight_decay") else 0,
+        )
         params = self.classifier.parameters()
-        self.classifier_opt = torch.optim.Adam(params, lr=args.learning_rate)
+        self.classifier_opt = torch.optim.Adam(
+            params,
+            lr=args.learning_rate,
+            weight_decay=args.weight_decay if hasattr(args, "weight_decay") else 0,
+        )
         self.gcn_opt.zero_grad()
         self.classifier_opt.zero_grad()
 
-    def load_checkpoint(self, filename, model):
+    def load_checkpoint(self, filename: str) -> dict:
         """Load model checkpoint.
 
         Args:
-                filename: Checkpoint file path.
-                model: Model object.
+            filename: Checkpoint file path.
 
         Returns:
-                int: Epoch number from checkpoint, or 0 if not found.
+            dict: The loaded checkpoint dictionary, or empty dict if not found.
         """
         if os.path.isfile(filename):
             print(f"=> loading checkpoint '{filename}'")
-            checkpoint = torch.load(filename)
-            epoch = checkpoint["epoch"]
+            checkpoint = torch.load(filename, map_location=self.args.device)
             self.gcn.load_state_dict(checkpoint["gcn_dict"])
             self.classifier.load_state_dict(checkpoint["classifier_dict"])
+
             self.gcn_opt.load_state_dict(checkpoint["gcn_optimizer"])
             self.classifier_opt.load_state_dict(checkpoint["classifier_optimizer"])
-            self.logger.log_str(f"=> loaded checkpoint '{filename}' (epoch {checkpoint['epoch']})")
-            return epoch
-        else:
-            self.logger.log_str(f"=> no checkpoint found at '{filename}'")
-            return 0
+
+            msg = f"=> loaded checkpoint '{filename}' (epoch {checkpoint['epoch']})"
+            if "best_test_metric" in checkpoint:
+                msg += f" | metric {checkpoint['best_test_metric']:.4f}"
+            self.logger.log_str(msg)
+            return checkpoint
+        self.logger.log_str(f"=> no checkpoint found at '{filename}'")
+        return {}
 
     def train(self):
         """Execute the training loop with validation and early stopping."""
@@ -91,17 +100,20 @@ class Trainer:
         best_eval_valid = 0
         eval_valid = 0
 
+        self.gcn_opt.zero_grad()
+        self.classifier_opt.zero_grad()
+
         for e in range(self.args.num_epochs):
             # Set models to training mode
             self.gcn.train()
             self.classifier.train()
             eval_train, nodes_embs = self.run_epoch(self.splitter.train, e, "TRAIN", grad=True)
-
             if len(self.splitter.dev) > 0:
                 # Set models to evaluation mode
                 self.gcn.eval()
                 self.classifier.eval()
-                eval_valid, _ = self.run_epoch(self.splitter.dev, e, "VALID", grad=False)
+                with torch.no_grad():
+                    eval_valid, _ = self.run_epoch(self.splitter.dev, e, "VALID", grad=False)
                 if eval_valid > best_eval_valid:
                     best_eval_valid = eval_valid
                     print("### w" + ") ep " + str(e) + " - Best valid measure:" + str(eval_valid))
@@ -110,7 +122,8 @@ class Trainer:
                 # Set models to evaluation mode
                 self.gcn.eval()
                 self.classifier.eval()
-                eval_test, _ = self.run_epoch(self.splitter.test, e, "TEST", grad=False)
+                with torch.no_grad():
+                    eval_test, _ = self.run_epoch(self.splitter.test, e, "TEST", grad=False)
 
                 if self.args.save_node_embeddings:
                     log_file = os.path.join(self.args.log_dir, f"epoch_{e}")
@@ -128,79 +141,61 @@ class Trainer:
         """Run a single training/evaluation epoch.
 
         Args:
-                split: Data split (train/dev/test).
-                epoch: Epoch number.
-                set_name: Name of the split (TRAIN/VALID/TEST).
-                grad: Whether to enable gradients.
+            split: Data split (train/dev/test).
+            epoch: Epoch number.
+            set_name: Name of the split (TRAIN/VALID/TEST).
+            grad: Whether to enable gradients.
 
         Returns:
-                tuple: (evaluation metric, node embeddings)
+            tuple: (evaluation metric, node embeddings)
         """
-        t0 = time.time()
-        log_interval = 999
-        if set_name == "TEST":
-            log_interval = 1
+        log_interval = 1 if set_name == "TEST" else 999
         self.logger.log_epoch_start(
             epoch, len(split), set_name, minibatch_log_interval=log_interval
         )
 
-        # Use context manager for validation/test to ensure no gradients are computed
-        context_manager = torch.no_grad() if not grad else torch.enable_grad()
+        nodes_embs = None
+        running_loss = 0.0
 
-        with context_manager:
-            nodes_embs = None
-            # Disable tqdm if console logging is suppressed for this epoch
-            disable_pbar = not getattr(self.logger, "console_log", True)
-            pbar = tqdm.tqdm(
-                split, desc=f"Epoch {epoch} - {set_name}", leave=True, disable=disable_pbar
+        pbar = tqdm(split, desc=f"Epoch {epoch} - {set_name}")
+
+        for i, s in enumerate(pbar):
+            s = self.prepare_sample(s)
+
+            predictions, nodes_embs = self.predict(
+                s.hist_adj_list, s.hist_ndFeats_list, s.label_sp["idx"], s.node_mask_list
             )
-            running_loss = 0.0
-            batch_count = 0
 
-            for s in pbar:
-                s = self.prepare_sample(s)
+            loss = self.comp_loss(predictions, s.label_sp["vals"])
 
-                predictions, nodes_embs = self.predict(
-                    s.hist_adj_list, s.hist_ndFeats_list, s.label_sp["idx"], s.node_mask_list
-                )
+            if grad:
+                self.optim_step(loss)
 
-                loss = self.comp_loss(predictions, s.label_sp["vals"])
+            # Update metrics and progress bar
+            running_loss = (running_loss * i + loss.item()) / (i + 1)
+            pbar.set_postfix(loss=f"{running_loss:.4f}")
 
-                # Update running metrics for tqdm
-                batch_count += 1
-                running_loss = (running_loss * (batch_count - 1) + loss.item()) / batch_count
-                pbar.set_postfix(
-                    {"loss": f"{running_loss:.4f}", "batch_loss": f"{loss.item():.4f}"}
-                )
-                self.logger.log_minibatch(
-                    predictions, s.label_sp["vals"], loss.detach(), adj=s.label_sp["idx"]
-                )
+            # Pass filter_edges for filtered ranking (if available)
+            log_kwargs = {"adj": s.label_sp["idx"]}
+            if hasattr(s, "filter_edges"):
+                log_kwargs["filter_edges"] = s.filter_edges
 
-                if grad:
-                    self.optim_step(loss)
-                    # Force cleanup during training to prevent memory accumulation
-                    del predictions, loss
-                    if nodes_embs is not None and not self.args.save_node_embeddings:
-                        del nodes_embs
-                        nodes_embs = None
-                    torch.cuda.empty_cache() if self.args.use_cuda else None
+            self.logger.log_minibatch(predictions, s.label_sp["vals"], loss.detach(), **log_kwargs)
 
-                # Free memory for validation/test after each batch
-                if not grad:
-                    del predictions, loss
-                    if nodes_embs is not None and not self.args.save_node_embeddings:
-                        del nodes_embs
-                        nodes_embs = None
-                    torch.cuda.empty_cache() if self.args.use_cuda else None
+            # Force cleanup to prevent memory accumulation
+            del predictions, loss
+            if nodes_embs is not None and not self.args.save_node_embeddings:
+                nodes_embs = None
 
-            # Explicit garbage collection after epoch
-            gc.collect()
             if self.args.use_cuda:
                 torch.cuda.empty_cache()
 
-        eval_measure = self.logger.log_epoch_done()
+        # Explicit garbage collection after epoch
+        gc.collect()
+        if self.args.use_cuda:
+            torch.cuda.empty_cache()
 
-        return eval_measure, nodes_embs
+        return self.logger.log_epoch_done(), nodes_embs
 
     def predict(self, hist_adj_list, hist_ndFeats_list, node_indices, mask_list):
         """Get model predictions for given node pairs.
@@ -251,6 +246,15 @@ class Trainer:
                 Concatenated embeddings for node pairs.
         """
         cls_input = []
+
+        # Safety check: verify indices are within bounds
+        max_idx = node_indices.max().item()
+        if max_idx >= nodes_embs.size(0):
+            raise IndexError(
+                f"Node index {max_idx} out of bounds for embedding tensor with size {nodes_embs.size(0)}.\n"
+                f"This usually means label edges were not properly remapped to the compacted node space.\n"
+                f"node_indices shape: {node_indices.shape}, nodes_embs shape: {nodes_embs.shape}"
+            )
 
         for j, node_set in enumerate(node_indices):
             emb = nodes_embs[node_set]
@@ -356,49 +360,41 @@ class Trainer:
         # Get train/test pairs - training snapshots use normal negative sampling,
         # test snapshots use all_edges for comprehensive evaluation
         train_test_pairs = []
-        for i in range(len(self.splitter.snapshots) - 1):
+        for i in range(len(self.splitter.train_snapshots) - 1):
             # Train on snapshot i (training version), test on snapshot i+1 (test version)
+            # This ensures we predict the NEXT time step (future prediction)
             train_test_pairs.append(
-                (self.splitter.snapshots[i], self.splitter._test_snapshots[i + 1])
+                (self.splitter.train_snapshots[i], self.splitter.test_snapshots[i + 1])
             )
-        num_phases = len(train_test_pairs)
 
-        if num_phases < 1:
+        if len(train_test_pairs) < 1:
             raise ValueError("Incremental training requires at least 2 snapshots")
 
         all_results = []
 
         for phase_idx, (train_snapshot, test_snapshot) in enumerate(train_test_pairs):
             # Construct phase description
-            # Training accumulates history, so we train on 0...phase_idx
-            # And test on phase_idx + 1
-            phase_desc = f"Snapshot 0-{phase_idx} -> {phase_idx + 1}"
+            # train_snapshots[i] uses time step (valid_start + i) as the prediction target
+            # test_snapshots[i+1] uses time step (valid_start + i + 1) as the prediction target
+            train_time_step = self.splitter.valid_start + phase_idx
+            test_time_step = self.splitter.valid_start + phase_idx + 1
+            phase_desc = f"Train on snapshot {train_time_step}, test on snapshot {test_time_step}"
 
             print(f"\n{'=' * 60}")
-            if phase_idx == 0:
-                print(f"{phase_desc} (Initial Training)")
+            print(f"{phase_desc} Training")
+            # Load best checkpoint from previous phase before fine-tuning
+            # This ensures we start from the best epoch based on target metric
+            prev_phase = phase_idx - 1
+            best_checkpoint_path = os.path.join(
+                getattr(self.args, "log_dir", "log/"),
+                f"checkpoint_phase_{prev_phase}_best.pth.tar",
+            )
+            if os.path.isfile(best_checkpoint_path):
+                print(f"\n  Loading best checkpoint from phase {prev_phase}...")
+                self.load_checkpoint(best_checkpoint_path)
             else:
-                print(f"{phase_desc} (Fine-tuning)")
-                # Load best checkpoint from previous phase before fine-tuning
-                # This ensures we start from the best epoch based on target metric (MAP)
-                prev_phase = phase_idx - 1
-                best_checkpoint_path = os.path.join(
-                    getattr(self.args, "log_dir", "log/"),
-                    f"checkpoint_phase_{prev_phase}_best.pth.tar",
-                )
-                if os.path.isfile(best_checkpoint_path):
-                    print(f"\n  Loading best checkpoint from phase {prev_phase}...")
-                    checkpoint = torch.load(best_checkpoint_path, map_location=self.args.device)
-                    self.gcn.load_state_dict(checkpoint["gcn_dict"])
-                    self.classifier.load_state_dict(checkpoint["classifier_dict"])
-                    self.gcn_opt.load_state_dict(checkpoint["gcn_optimizer"])
-                    self.classifier_opt.load_state_dict(checkpoint["classifier_optimizer"])
-                    print(
-                        f"  ✓ Loaded from epoch {checkpoint['epoch']} with metric {checkpoint['best_test_metric']:.4f}"
-                    )
-                else:
-                    print(f"  ⚠ Warning: Best checkpoint not found at {best_checkpoint_path}")
-                    print(f"     Continuing with current model state...")
+                print(f"  Warning: Best checkpoint not found at {best_checkpoint_path}")
+                print("  Continuing with current model state...")
             print(f"{'=' * 60}\n")
 
             phase_results = self._run_incremental_phase(
@@ -410,9 +406,6 @@ class Trainer:
             )
 
             all_results.append(phase_results)
-
-            # Note: Best checkpoint is saved during training when best metric is achieved
-            # See _run_incremental_phase() where checkpoint_phase_{phase_idx}_best.pth.tar is saved
 
         # Print summary of all phases
         self._print_incremental_summary(all_results)
@@ -439,12 +432,13 @@ class Trainer:
             dict: Results containing train/test metrics and epoch info.
         """
         self.tr_step = 0
-        best_eval_train = 0
         best_eval_test = 0
         best_epoch = 0
         epochs_without_impr = 0
 
-        # Use fewer epochs for fine-tuning phases
+        self.gcn_opt.zero_grad()
+        self.classifier_opt.zero_grad()
+
         num_epochs = self.args.num_epochs if is_initial else self.args.finetune_epochs
 
         phase_results = {
@@ -474,7 +468,8 @@ class Trainer:
             # Testing
             self.gcn.eval()
             self.classifier.eval()
-            eval_test, _ = self.run_epoch(test_snapshot, e, f"TEST [{phase_desc}]", grad=False)
+            with torch.no_grad():
+                eval_test, _ = self.run_epoch(test_snapshot, e, f"TEST [{phase_desc}]", grad=False)
             phase_results["test_metrics"].append(eval_test)
 
             # Track best performance
@@ -483,7 +478,9 @@ class Trainer:
                 best_epoch = e
                 epochs_without_impr = 0
                 target_measure = getattr(self.args, "target_measure", "metric")
-                print(f"  -> New best test {target_measure}: {best_eval_test:.4f}")
+                print(
+                    f"  -> New best test {target_measure}: {best_eval_test:.4f} (epoch {best_epoch}); saving checkpoint..."
+                )
 
                 # Save checkpoint with the BEST model state (not the last one)
                 # This ensures we can resume from the best epoch based on target metric (e.g., MAP)
@@ -502,9 +499,11 @@ class Trainer:
                     "classifier_dict": self.classifier.state_dict(),
                     "gcn_optimizer": self.gcn_opt.state_dict(),
                     "classifier_optimizer": self.classifier_opt.state_dict(),
+                    "predictions_filepath": getattr(
+                        self.logger, "last_predictions_filepath", None
+                    ),
                 }
                 torch.save(checkpoint_data, checkpoint_path)
-                print(f"     ✓ Best checkpoint saved (epoch {best_epoch})")
             else:
                 epochs_without_impr += 1
 
@@ -513,19 +512,42 @@ class Trainer:
 
         target_measure = getattr(self.args, "target_measure", "metric")
         print(f"\n[{phase_desc}] completed:")
-        print(f"  Best test {target_measure}: {best_eval_test:.4f} at epoch {best_epoch}")
+        print(f" Best test {target_measure}: {best_eval_test:.4f} at epoch {best_epoch}")
 
         # Compute and save graph structure metrics at the end of the phase (if enabled)
-        # This captures the properties of the predicted graph from the last epoch
+        # This captures the properties of the predicted graph from the BEST epoch
         if not getattr(self.args, "no_graph_metrics", False):
-            print(f"\n  Computing graph structure metrics for {phase_desc}...")
+            print(f"\nComputing graph structure metrics for {phase_desc}...")
             try:
+                # Load the best checkpoint to ensure metrics are computed on best model
+                log_dir = getattr(self.args, "log_dir", "log/")
+                checkpoint_path = os.path.join(
+                    log_dir, f"checkpoint_phase_{phase_idx}_best.pth.tar"
+                )
+
+                if os.path.exists(checkpoint_path):
+                    print(f"Loading best checkpoint from epoch {best_epoch}...")
+                    checkpoint = torch.load(checkpoint_path, map_location=self.args.device)
+
+                    # Load predictions from saved .edg file instead of re-running
+                    predictions_filepath = checkpoint.get("predictions_filepath")
+                    if predictions_filepath and os.path.exists(predictions_filepath):
+                        self._load_predictions_from_edg(predictions_filepath)
+                    else:
+                        print("Warning: Predictions file not found, skipping graph metrics")
+                        graph_metrics = {}
+                        phase_results["graph_metrics"] = graph_metrics
+                        return phase_results
+                else:
+                    print("Warning: Best checkpoint not found, using current model state")
+
                 # Determine which snapshot we're testing on
-                # In incremental training, we test on snapshot (phase_idx + 1)
-                test_snapshot_idx = phase_idx + 1
+                # train_snapshots[phase_idx] uses time step (valid_start + phase_idx)
+                # We test on time step (valid_start + phase_idx + 1)
+                test_snapshot_idx = self.splitter.valid_start + phase_idx + 1
 
                 # Compute graph metrics using accumulated predictions from logger
-                # These predictions come from the TEST epoch of the last training epoch
+                # These predictions now come from the BEST epoch's TEST run
                 graph_metrics = self.logger.compute_and_log_phase_graph_metrics(
                     num_nodes=self.num_nodes, phase_idx=phase_idx, snapshot_idx=test_snapshot_idx
                 )
@@ -541,17 +563,64 @@ class Trainer:
                         snapshot_idx=test_snapshot_idx,
                         graph_metrics=graph_metrics,
                     )
-                    print(f"  ✓ Graph metrics and files saved successfully")
+                    print("Graph metrics and files saved successfully")
                 else:
-                    print(f"  ⚠ No graph metrics computed (no predictions accumulated)")
+                    print("No graph metrics computed (no predictions accumulated)")
 
             except Exception as e:
-                print(f"  ⚠ Warning: Could not compute or save graph metrics: {e}")
+                print(f"Warning: Could not compute or save graph metrics: {e}")
                 phase_results["graph_metrics"] = {}
         else:
             phase_results["graph_metrics"] = {}
 
         return phase_results
+
+    def _load_predictions_from_edg(self, filepath: str) -> None:
+        """Load predictions from a saved .edg file and populate logger buffers.
+
+        Args:
+            filepath: Path to the .edg file containing predictions.
+        """
+        # Read the file
+        edges_idx = []
+        edges_probs = []
+        edges_vals = []
+        edges_labels = []
+
+        with open(filepath) as f:
+            for line in f:
+                # Skip header and comments
+                if line.startswith("#"):
+                    continue
+
+                parts = line.strip().split("\t")
+                if len(parts) >= 4:
+                    src, dst, prob, label = parts[:4]
+                    edges_idx.append([int(src), int(dst)])
+                    edges_probs.append(float(prob))
+                    # Predicted value based on threshold
+                    edges_vals.append(1 if float(prob) > 0.5 else 0)
+                    edges_labels.append(int(label))
+
+        # Convert to tensors and populate logger buffers
+        if edges_idx:
+            # Clear existing buffers
+            self.logger.pred_edges_idx = []
+            self.logger.pred_edges_vals = []
+            self.logger.pred_edge_probs = []
+            self.logger.pred_edges_labels = []
+
+            # Convert to tensors - match the format expected by compute_and_log_phase_graph_metrics
+            edge_idx_tensor = torch.tensor(edges_idx, dtype=torch.long).t()  # [2, num_edges]
+            edge_probs_tensor = torch.tensor(edges_probs, dtype=torch.float32)
+            edge_vals_tensor = torch.tensor(edges_vals, dtype=torch.long)
+            edge_labels_tensor = torch.tensor(edges_labels, dtype=torch.long)
+
+            # Append as single batch (logger expects list of batches)
+            self.logger.pred_edges_idx.append(edge_idx_tensor)
+            self.logger.pred_edges_vals.append(edge_vals_tensor)
+            self.logger.pred_edge_probs.append(edge_probs_tensor)
+            self.logger.pred_edges_labels.append(edge_labels_tensor)
 
     def _save_phase_graphs(
         self, phase_idx: int, phase_desc: str, snapshot_idx: int, graph_metrics: dict
@@ -565,21 +634,25 @@ class Trainer:
         - .png file: Visualization of the Giant Connected Component
 
         Args:
-            phase_idx: Current phase index (training on snapshots 0..phase_idx)
+            phase_idx: Current phase index (0-based)
             phase_desc: Human-readable description of the phase
-            snapshot_idx: Index of the snapshot being tested (phase_idx + 1)
+            snapshot_idx: Index of the snapshot being tested (phase_idx + 2)
             graph_metrics: Dictionary containing computed graph metrics
 
         Output Structure:
             graphs/
-            └── phase_{phase_idx}_snapshot_{snapshot_idx}/
+            └── train_snapshot_{train}_test_snapshot_{test}/
                 ├── predicted_graph.edg          # Edge list X→Y
                 ├── predicted_graph.graphml      # XML with metadata
                 └── gcc_visualization.png        # GCC plot
         """
-        # Create directory structure
+        # Create directory structure with clear train/test snapshot names
         # Using Path for cross-platform compatibility
-        graphs_dir = Path("graphs") / f"phase_{phase_idx}_snapshot_{snapshot_idx}"
+        # snapshot_idx already represents the correct time step for testing
+        train_snapshot_idx = snapshot_idx - 1  # Train snapshot is one step before test
+        graphs_dir = (
+            Path("graphs") / f"train_snapshot_{train_snapshot_idx}_test_snapshot_{snapshot_idx}"
+        )
         graphs_dir.mkdir(parents=True, exist_ok=True)
 
         # Import graph_metrics module
@@ -653,29 +726,8 @@ class Trainer:
             gm.GraphMetricsCalculator.save_graph_graphml(
                 G, edge_prob_dict, node_community, str(graphml_path), phase_info
             )
-            print(f"    Saved GraphML: {graphml_path}")
-
-            # Save visualization of GCC (optional, can be disabled with --no-graph-viz)
-            # Visual representation with community colors
-            viz_path = graphs_dir / "gcc_visualization.png"
-            if not getattr(self.args, "no_graph_viz", False):
-                title = (
-                    f"Phase {phase_idx} - GCC (Snapshot {snapshot_idx})\n"
-                    f"{graph_metrics.get('num_communities', 0)} communities, "
-                    f"modularity={graph_metrics.get('modularity', 0):.3f}"
-                )
-                gm.GraphMetricsCalculator.visualize_gcc(G, node_community, str(viz_path), title)
-                print(f"    Saved visualization: {viz_path}")
-            else:
-                print(f"    ⏩ Skipped visualization (disabled with --no-graph-viz)")
-
-            print(f"\n  Graph files saved to: {graphs_dir}")
-            print(f"    - {edg_path.name} (edge list)")
-            print(f"    - {graphml_path.name} (XML with metadata)")
-            if not getattr(self.args, "no_graph_viz", False):
-                print(f"    - {viz_path.name} (GCC visualization)")
         else:
-            print(f"  ⚠ No predictions accumulated, skipping graph file generation")
+            print("  ⚠ No predictions accumulated, skipping graph file generation")
 
     def _print_incremental_summary(self, all_results: list) -> None:
         """Print a summary of all incremental training phases.
@@ -684,26 +736,16 @@ class Trainer:
             all_results: List of results from each phase.
         """
         print("\n" + "=" * 80)
-        print("SUMMARY OF ALL INCREMENTAL TRAINING PHASES")
+        print("SUMMARY")
         print("=" * 80)
 
         # Standard metrics summary
         for result in all_results:
-            phase_type = "Initial Training" if result["is_initial"] else "Fine-tuning"
             phase_desc = result.get("phase_desc", f"Phase {result['phase_idx']}")
-            print(f"\n{phase_desc} ({phase_type}):")
+            print(f"\n{phase_desc}:")
             print(f"  Best Test Metric: {result['best_test_metric']:.4f}")
             print(f"  Best Epoch: {result['best_epoch']}")
             print(f"  Total Epochs: {len(result['train_metrics'])}")
-
-        # Calculate average performance across all test phases
-        test_metrics = [r["best_test_metric"] for r in all_results]
-        print(f"\n{'=' * 80}")
-        print(f"Overall Test Performance:")
-        print(f"  Average: {np.mean(test_metrics):.4f}")
-        print(f"  Std Dev: {np.std(test_metrics):.4f}")
-        print(f"  Min: {np.min(test_metrics):.4f}")
-        print(f"  Max: {np.max(test_metrics):.4f}")
 
         # NEW: Graph structure metrics summary table
         # Display metrics across all phases for comparison
@@ -786,10 +828,8 @@ class Trainer:
             # print(f"  • Communities: Number of detected communities")
             # print(f"  • GCC Ratio: Fraction of nodes in Giant Connected Component")
 
-            print(f"\nGraph files saved in: graphs/phase_{{i}}_snapshot_{{i+1}}/")
-            print(
-                f"  Each directory contains: .edg (edge list), .graphml (XML), .png (visualization)"
-            )
+            print("\nGraph files saved in: graphs/train_snapshot_{train}_test_snapshot_{test}/")
+            print("  Each directory contains: .edg (edge list), .graphml (XML)")
         else:
             print(f"\n{'=' * 80}")
             print("No graph structure metrics available")

@@ -19,11 +19,10 @@ def pad_with_last_val(vect, k):
     """
     device = "cuda" if vect.is_cuda else "cpu"
     pad = torch.ones(k - vect.size(0), dtype=torch.long, device=device) * vect[-1]
-    vect = torch.cat([vect, pad])
-    return vect
+    return torch.cat([vect, pad])
 
 
-def sparse_prepare_tensor(tensor, torch_size, ignore_batch_dim=True):
+def sparse_prepare_tensor(tensor, torch_size):
     """Prepare a sparse tensor for model input.
 
     Args:
@@ -34,9 +33,7 @@ def sparse_prepare_tensor(tensor, torch_size, ignore_batch_dim=True):
     Returns:
         Sparse tensor of specified size.
     """
-    if ignore_batch_dim:
-        # remove batch dimension
-        tensor = {"idx": tensor["idx"][0], "vals": tensor["vals"][0]}
+    tensor = {"idx": tensor["idx"][0], "vals": tensor["vals"][0]}
 
     tensor_size = torch.Size(torch_size) if len(torch_size) == 2 else torch.Size(torch_size * 2)
 

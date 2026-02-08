@@ -102,19 +102,30 @@ class IncrementalSplitter:
             else int(tasker.dataset.max_time)
         )
 
+        # in our case, from the first to the last snapshot
         self.min_time = min_time_val
         self.max_time = max_time_val
         self.num_hist_steps = args.num_hist_steps
 
-        # Calculate valid time range (accounting for history)
-        self.valid_start = min_time_val + args.num_hist_steps
+        # Calculate valid snapshot range
+        # By default, skip snapshots reserved for history (num_hist_steps)
+        # If start_from_first_snapshot is True, start from 0 regardless (adaptive cold start)
+        allow_first_snapshot = getattr(args, "start_from_first_snapshot", False)
+
+        if allow_first_snapshot:
+            # Start from first snapshot (0), use adaptive cold start when no history available
+            self.valid_start = min_time_val
+        else:
+            # Standard behavior: skip snapshots reserved for history
+            self.valid_start = min_time_val + args.num_hist_steps
+
         self.valid_end = max_time_val + 1
 
         self.num_snapshots = self.valid_end - self.valid_start
 
         # Create snapshot boundaries
         self.snapshot_boundaries = self._compute_snapshot_boundaries()
-        self.snapshots = self._create_snapshots()
+        self.train_snapshots, self.test_snapshots = self._create_snapshots()
 
     def _compute_snapshot_boundaries(self) -> List[tuple]:
         """Compute the time boundaries for each snapshot.
@@ -122,24 +133,7 @@ class IncrementalSplitter:
         Returns:
             List of (start, end) tuples for each snapshot.
         """
-        total_time_steps = self.valid_end - self.valid_start
-        boundaries = []
-
-        if self.num_snapshots >= total_time_steps:
-            # Each time step is its own snapshot
-            for t in range(self.valid_start, self.valid_end):
-                boundaries.append((t, t + 1))
-        else:
-            # Divide time range into num_snapshots equal parts
-            steps_per_snapshot = total_time_steps / self.num_snapshots
-            for i in range(self.num_snapshots):
-                start = self.valid_start + int(i * steps_per_snapshot)
-                end = self.valid_start + int((i + 1) * steps_per_snapshot)
-                if i == self.num_snapshots - 1:
-                    end = self.valid_end  # Ensure last snapshot includes all remaining
-                boundaries.append((start, end))
-
-        return boundaries
+        return [(t, t + 1) for t in range(self.valid_start, self.valid_end)]
 
     def _create_snapshots(self) -> List[DataLoader]:
         """Create DataLoader for each snapshot.
@@ -158,7 +152,10 @@ class IncrementalSplitter:
             # Training version - uses normal negative sampling
             train_data = DataSplit(self.tasker, start, end, test=False)
             train_loader = DataLoader(
-                train_data, batch_size=1, num_workers=self.args.data_loading_params["num_workers"]
+                train_data,
+                batch_size=1,
+                num_workers=self.args.data_loading_params["num_workers"],
+                pin_memory=True,
             )
             train_snapshots.append(train_loader)
 
@@ -166,13 +163,14 @@ class IncrementalSplitter:
             test_data = DataSplit(self.tasker, start, end, test=True)  # , all_edges=True)
 
             test_loader = DataLoader(
-                test_data, batch_size=1, num_workers=self.args.data_loading_params["num_workers"]
+                test_data,
+                batch_size=1,
+                num_workers=self.args.data_loading_params["num_workers"],
+                pin_memory=True,
             )
             test_snapshots.append(test_loader)
 
-        # Store both versions
-        self._test_snapshots = test_snapshots
-        return train_snapshots
+        return train_snapshots, test_snapshots
 
     def __len__(self) -> int:
         """Get the number of snapshots.
@@ -180,7 +178,7 @@ class IncrementalSplitter:
         Returns:
             Number of snapshots.
         """
-        return len(self.snapshots)
+        return len(self.train_snapshots)
 
 
 class DataSplit(Dataset):
@@ -220,5 +218,4 @@ class DataSplit(Dataset):
             Sample dict with input features and labels.
         """
         idx = self.start + idx
-        t = self.tasker.get_sample(idx, test=self.test, **self.kwargs)
-        return t
+        return self.tasker.get_sample(idx, test=self.test, **self.kwargs)

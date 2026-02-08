@@ -2,6 +2,7 @@ data: gab  # Gab dataset for incremental training
 
 gab_args:
   folder: ./data/
+  feats_per_node: 768  # BERT embedding dimension
 
 use_cuda: True
 
@@ -30,7 +31,6 @@ data_loading_params:
   num_workers: 0
 
 gcn_parameters:
-  feats_per_node: 768  # BERT embedding dimension
   layer_1_feats: 128
   layer_2_feats: 64
   k_top_grcu: 768 #50

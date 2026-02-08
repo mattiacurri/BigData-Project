@@ -23,12 +23,11 @@ class GabDataset:
             args: Configuration namespace with dataset parameters.
 
         """
-        args.gab_args = SimpleNamespace(**args.gab_args)
+        self.args_gab = SimpleNamespace(**args.gab_args)
 
-        # Setup for edge loading
-        self.folder_path = Path(args.gab_args.folder)
+        self.folder_path = Path(self.args_gab.folder)
         self.raw_folder = self.folder_path / "raw"
-        self.time_periods = ["2016-2021", "2022", "2023", "2024", "Jan-Jul 25", "Jul 25"]
+        self.time_periods = sorted([d.name for d in self.raw_folder.iterdir() if d.is_dir()])
         self.loaded_snapshots = set()  # Track which snapshots have been loaded
 
         self.ecols = SimpleNamespace(FromNodeId=0, ToNodeId=1, TimeStep=2)
@@ -38,10 +37,7 @@ class GabDataset:
         edges = torch.tensor(
             edges_df[["FromNodeId", "ToNodeId", "TimeStep"]].values, dtype=torch.float32
         )
-        edges = self.make_contigous_node_ids(edges)
-
-        # Save args for later use
-        self.args_gab = args.gab_args
+        edges = self.make_contiguous_node_ids(edges)
 
         # Compute nodes per snapshot for incremental learning
         timesteps = edges[:, self.ecols.TimeStep]  # Usa timestamp originali senza aggregazione
@@ -63,7 +59,7 @@ class GabDataset:
         # [from, to, time, label]
         indices_labels = torch.cat([sp_indices.t(), new_vals.view(-1, 1)], dim=1)
 
-        # All edges have value 1
+        # All edges have value 1, it's used then to compute the loss to distinguish between existing and non-existing edges (which have 0 on the edge)
         vals = torch.ones(sp_indices.size(1), dtype=torch.float32)
 
         self.edges = {"idx": indices_labels, "vals": vals}
@@ -73,7 +69,7 @@ class GabDataset:
         self.num_nodes = edges[:, [self.ecols.FromNodeId, self.ecols.ToNodeId]].unique().size(0)
 
         # Create post-to-snapshot mapping
-        self.post_to_snapshot, self.post_to_user = self._create_post_mappings(args.gab_args)
+        self.post_to_snapshot, self.post_to_user = self._create_post_mappings()
 
         # Create user ID mapping
         unique_users = set(edges_df["FromNodeId"].unique()) | set(edges_df["ToNodeId"].unique())
@@ -83,16 +79,14 @@ class GabDataset:
             idx: user_id for user_id, idx in self.user_id_to_node_idx.items()
         }
 
-        # Embeddings file path (loaded on-demand in get_temporal_node_features)
-        self._embeddings_file = Path(args.gab_args.folder) / "raw" / "bert_features_real_posts.pkl"
-
-        with open(self._embeddings_file, "rb") as f:
+        # Load all precomputed BERT embeddings for posts
+        with open(self.folder_path / "raw" / "bert_features_real_posts.pkl", "rb") as f:
             self.all_embeddings = pickle.load(f)
 
-        self.feats_per_node = 768  # BERT embedding dimension
+        self.feats_per_node = self.args_gab.feats_per_node  # 768 -> BERT embedding dimension
 
         # Cache for temporal node features (snapshot -> tensor)
-        self._temporal_features_cache: Dict[int, torch.Tensor] = {}
+        # self._temporal_features_cache: Dict[int, torch.Tensor] = {}
 
     def _load_all_snapshots(self) -> pd.DataFrame:
         """Load edges from all snapshots.
@@ -132,76 +126,7 @@ class GabDataset:
         if not all_edges:
             raise ValueError("No edge files found in the data folder")
 
-        edges_df = pd.concat(all_edges, ignore_index=True)
-
-        return edges_df
-
-    def _load_snapshot_edges(self, snapshot_idx: int) -> pd.DataFrame:
-        """Load edges for a specific snapshot.
-
-        Args:
-            snapshot_idx: Index of the snapshot to load.
-
-        Returns:
-            DataFrame with columns ['FromNodeId', 'ToNodeId', 'TimeStep'].
-        """
-        if snapshot_idx in self.loaded_snapshots:
-            print(f"Snapshot {snapshot_idx} already loaded, skipping...")
-            return pd.DataFrame(columns=["FromNodeId", "ToNodeId", "TimeStep"])
-
-        if snapshot_idx >= len(self.time_periods):
-            raise ValueError(
-                f"Snapshot index {snapshot_idx} out of range [0, {len(self.time_periods)})"
-            )
-
-        period = self.time_periods[snapshot_idx]
-        period_folder = self.raw_folder / period
-
-        edges_file = period_folder / "social_network.edg"
-
-        print(f"Loading edges from snapshot {snapshot_idx} ({period})...")
-        edges = self._load_edg_file(edges_file)
-
-        snapshot_df = pd.DataFrame(
-            {
-                "FromNodeId": edges[:, 0].numpy(),
-                "ToNodeId": edges[:, 1].numpy(),
-                "TimeStep": snapshot_idx,
-            }
-        )
-
-        self.loaded_snapshots.add(snapshot_idx)
-        print(f"  Loaded {len(snapshot_df)} edges from snapshot {snapshot_idx}")
-
-        return snapshot_df
-
-    def _get_loaded_snapshot_edges(self, snapshot_idx: int) -> pd.DataFrame:
-        """Reload edges from a previously loaded snapshot.
-
-        Args:
-            snapshot_idx: Index of the snapshot.
-
-        Returns:
-            DataFrame with edges from this snapshot.
-        """
-        if snapshot_idx >= len(self.time_periods):
-            raise ValueError(f"Snapshot index {snapshot_idx} out of range")
-
-        period = self.time_periods[snapshot_idx]
-        period_folder = self.raw_folder / period
-        edges_file = period_folder / "social_network.edg"
-
-        edges = self._load_edg_file(edges_file)
-        snapshot_df = pd.DataFrame(
-            {
-                "FromNodeId": edges[:, 0].numpy(),
-                "ToNodeId": edges[:, 1].numpy(),
-                "TimeStep": snapshot_idx,
-            }
-        )
-
-        print(f"Reloaded {len(snapshot_df)} edges from snapshot {snapshot_idx}")
-        return snapshot_df
+        return pd.concat(all_edges, ignore_index=True)
 
     def _compute_nodes_per_snapshot(self, edges: torch.Tensor) -> None:
         """Compute which nodes appear up to each snapshot (cumulative).
@@ -235,7 +160,7 @@ class GabDataset:
             # Store cumulative nodes (all nodes seen up to this snapshot)
             self.cumulative_nodes_per_snapshot[snapshot] = all_nodes_so_far.copy()
 
-        print(f"\nNodes per snapshot (cumulative):")
+        print("\nNodes per snapshot (cumulative):")
         for snapshot in sorted(self.cumulative_nodes_per_snapshot.keys()):
             print(
                 f"  Snapshot {snapshot}: {len(self.cumulative_nodes_per_snapshot[snapshot])} nodes"
@@ -254,25 +179,18 @@ class GabDataset:
             sorted(list(self.cumulative_nodes_per_snapshot[snapshot])), dtype=torch.long
         )
 
-    def _create_post_mappings(self, gab_args) -> tuple[Dict[int, int], Dict[int, int]]:
+    def _create_post_mappings(self) -> tuple[Dict[int, int], Dict[int, int]]:
         """Create mappings from post_id to snapshot and post_id to user_id.
-
-        Args:
-            gab_args: Configuration with folder path.
 
         Returns:
             Tuple of (post_to_snapshot, post_to_user) dictionaries.
         """
-        folder_path = Path(gab_args.folder)
-        raw_folder = folder_path / "raw"
-        time_periods = ["2016-2021", "2022", "2023", "2024", "Jan-Jul 25", "Jul 25"]
-
         post_to_snapshot: Dict[int, int] = {}
         post_to_user: Dict[int, int] = {}
 
         print("Creating post-to-snapshot and post-to-user mappings...")
-        for snapshot_idx, period in enumerate(tqdm(time_periods, desc="Processing periods")):
-            period_folder = raw_folder / period
+        for snapshot_idx, period in enumerate(tqdm(self.time_periods, desc="Processing periods")):
+            period_folder = self.raw_folder / period
             posts_file = period_folder / "posts_current_snapshot.csv"
 
             if posts_file.exists():
@@ -306,14 +224,8 @@ class GabDataset:
             Nodes without features or that don't exist yet have zero vectors.
         """
         # Check cache first
-        if max_snapshot in self._temporal_features_cache:
-            return self._temporal_features_cache[max_snapshot]
-
-        # ??? For now we are doing in this way
-        # train on snapshot 0 -> mean(emb_0)
-        # test on snapshot 1 -> mean(emb_0)
-        # train on snapshot 1 -> mean(emb_0, emb_1)
-        # test on snapshot 2 -> mean(emb_0, emb_1)
+        # if max_snapshot in self._temporal_features_cache:
+        #     return self._temporal_features_cache[max_snapshot]
 
         # Get nodes that exist at this snapshot for filtering
         nodes_at_snapshot = set(self.get_node_indices_at_snapshot(max_snapshot).tolist())
@@ -345,14 +257,11 @@ class GabDataset:
         # Compute average embedding for each user
         users_with_features = 0
         for user_id, embeddings in user_embeddings.items():
-            node_idx = self.user_id_to_node_idx[user_id]
-            user_posts = torch.stack(embeddings)
-            avg_embedding = user_posts.mean(dim=0)
-            node_features[node_idx] = avg_embedding
+            node_features[self.user_id_to_node_idx[user_id]] = torch.stack(embeddings).mean(dim=0)
             users_with_features += 1
 
         # Cache the computed features
-        self._temporal_features_cache[max_snapshot] = node_features
+        # self._temporal_features_cache[max_snapshot] = node_features
 
         return node_features
 
@@ -373,7 +282,7 @@ class GabDataset:
                     edges.append([int(parts[0]), int(parts[1])])
         return torch.tensor(edges, dtype=torch.long)
 
-    def make_contigous_node_ids(self, edges):
+    def make_contiguous_node_ids(self, edges):
         """Remap node IDs to be contiguous (0 to num_nodes-1).
 
         Args:

@@ -147,9 +147,7 @@ class mat_GRU_cell(torch.nn.Module):
         h_cap = reset * prev_Q
         h_cap = self.htilda(z_topk, h_cap)
 
-        new_Q = (1 - update) * prev_Q + update * h_cap
-
-        return new_Q
+        return (1 - update) * prev_Q + update * h_cap
 
 
 class mat_GRU_gate(torch.nn.Module):
@@ -192,9 +190,7 @@ class mat_GRU_gate(torch.nn.Module):
         Returns:
             Gate output.
         """
-        out = self.activation(self.W.matmul(x) + self.U.matmul(hidden) + self.bias)
-
-        return out
+        return self.activation(self.W.matmul(x) + self.U.matmul(hidden) + self.bias)
 
 
 # No TopK selector in this variant

@@ -1,7 +1,7 @@
 """Logger for training and evaluation metrics.
 
 Provides comprehensive logging of training progress, evaluation metrics including
-precision, recall, F1-score, MRR, and MAP across different datasets and phases.
+precision, recall, F1-score, MRR, MAP, and AUC-ROC across different datasets and phases.
 Features: colored console output, timestamps, JSON metrics export, ASCII tables.
 """
 
@@ -9,14 +9,14 @@ import datetime
 import json
 import logging
 import os
+from pathlib import Path
 import sys
 import time
 from types import SimpleNamespace
-from typing import Dict, Optional
+from typing import Dict
 
 import numpy as np
-from scipy.sparse import coo_matrix
-from sklearn.metrics import average_precision_score
+from sklearn.metrics import average_precision_score, roc_auc_score
 import torch
 import wandb
 
@@ -57,8 +57,6 @@ class ColoredFormatter(logging.Formatter):
 
 class PlainFormatter(logging.Formatter):
     """Plain formatter for file output (no colors)."""
-
-    pass
 
 
 def format_table(headers, rows, title=None):
@@ -174,14 +172,6 @@ class Logger:
             root_logger.addHandler(stdout_handler)
             self.stdout_handler = stdout_handler
 
-            print(f"\n{'=' * 60}")
-            print(f"Log file: {self.log_name}")
-            print(f"Metrics JSON: {self.metrics_json_path}")
-            print(f"{'=' * 60}\n")
-
-            # logging.info("*** PARAMETERS ***")
-            # logging.info(pprint.pformat(args.__dict__))
-            # logging.info("")
         else:
             self.log_name = None
             self.metrics_json_path = None
@@ -263,6 +253,11 @@ class Logger:
         self.errors = []
         self.MRRs = []
         self.MAPs = []
+        self.AUCs = []  # AUC-ROC on sampled negatives
+
+        # Track number of samples for MRR and MAP
+        self.MRR_sample_counts = []
+        self.MAP_sample_counts = []
 
         self.conf_mat_tp = {}
         self.conf_mat_fn = {}
@@ -311,6 +306,7 @@ class Logger:
             self.pred_edges_idx = []  # List of [2, batch_size] tensors
             self.pred_edges_vals = []  # List of [batch_size] tensors (binary predictions)
             self.pred_edge_probs = []  # List of [batch_size] tensors (probabilities)
+            self.pred_edges_labels = []  # List of [batch_size] tensors (ground truth labels)
 
     def log_minibatch(self, predictions, true_classes, loss, **kwargs):
         """Log metrics for a single minibatch.
@@ -323,11 +319,23 @@ class Logger:
         """
         probs = torch.softmax(predictions, dim=1)[:, 1]
         if "adj" in kwargs:
-            MRR = self.get_MRR(probs, true_classes, kwargs["adj"], do_softmax=False)
+            filter_edges = kwargs.get("filter_edges")
+            MRR = self.get_MRR(
+                probs, true_classes, kwargs["adj"], filter_edges=filter_edges, do_softmax=False
+            )
+            # Store number of samples used for MRR calculation
+            self.last_mrr_num_samples = getattr(self, "_last_mrr_samples", 0)
         else:
             MRR = torch.tensor([0.0])
+            self.last_mrr_num_samples = 0
 
         MAP = torch.tensor(self.get_MAP(probs, true_classes, do_softmax=False))
+        # MAP is calculated on all samples
+        self.last_map_num_samples = len(true_classes)
+
+        # Calculate AUC-ROC on the sampled edges (positive + negative)
+        # This is "sampling-based AUC" - measures discrimination on evaluated pairs only
+        AUC = torch.tensor(self.get_AUC_ROC(probs, true_classes, do_softmax=False))
 
         error, conf_mat_per_class = self.eval_predicitions(
             predictions, true_classes, self.num_classes
@@ -345,6 +353,11 @@ class Logger:
         self.errors.append(error)
         self.MRRs.append(MRR)
         self.MAPs.append(MAP)
+        self.AUCs.append(AUC)
+
+        # Track sample counts for MRR and MAP
+        self.MRR_sample_counts.append(self.last_mrr_num_samples)
+        self.MAP_sample_counts.append(self.last_map_num_samples)
 
         for cl in range(self.num_classes):
             self.conf_mat_tp[cl] += conf_mat_per_class.true_positives[cl]
@@ -404,6 +417,7 @@ class Logger:
                 self.pred_edges_idx.append(kwargs["adj"].cpu())
                 self.pred_edges_vals.append(pred_binary.cpu())
                 self.pred_edge_probs.append(probs.cpu())
+                self.pred_edges_labels.append(true_classes.cpu())
 
         self.lasttime = time.monotonic()
 
@@ -414,15 +428,18 @@ class Logger:
             float: Primary evaluation metric for the epoch.
         """
         eval_measure = 0
-        epoch_time = time.monotonic() - self.ep_time
 
         self.losses = torch.stack(self.losses)
         mean_loss = float(self.losses.mean())
 
         # Calculate all metrics
-        epoch_error = self.calc_epoch_metric(self.batch_sizes, self.errors)
         epoch_MRR = self.calc_epoch_metric(self.batch_sizes, self.MRRs)
         epoch_MAP = self.calc_epoch_metric(self.batch_sizes, self.MAPs)
+        epoch_AUC = self.calc_epoch_metric(self.batch_sizes, self.AUCs)
+
+        # Calculate total number of samples used for MRR and MAP
+        sum(self.MRR_sample_counts)
+        total_map_samples = sum(self.MAP_sample_counts)
 
         micro_precision, micro_recall, micro_f1 = self.calc_microavg_eval_measures(
             self.conf_mat_tp, self.conf_mat_fn, self.conf_mat_fp
@@ -445,6 +462,8 @@ class Logger:
             eval_measure = epoch_MRR
         elif target == "map":
             eval_measure = epoch_MAP
+        elif target in ["auc", "auc_roc"]:
+            eval_measure = epoch_AUC
         elif target in ["precision", "prec"]:
             if str(self.args.target_class) == "AVG":
                 eval_measure = micro_precision
@@ -477,17 +496,13 @@ class Logger:
         # ASCII Table Summary
         main_metrics = {
             "Loss": f"{mean_loss:.4f}",
-            "Error": f"{epoch_error:.4f}",
             "Macro Prec": f"{precision:.4f}",
             "Macro Rec": f"{recall:.4f}",
             "Macro F1": f"{f1:.4f}",
             "MRR": f"{epoch_MRR:.4f}",
             "MAP": f"{epoch_MAP:.4f}",
+            "AUC-ROC": f"{epoch_AUC:.4f}",
         }
-
-        # Add time only for train/val, not for test
-        if self.set != "TEST":
-            main_metrics["Time"] = f"{epoch_time:.1f}s"
 
         table = format_metrics_table(self.set, self.epoch, main_metrics)
 
@@ -500,6 +515,26 @@ class Logger:
             # We need to mute StdoutHandler specifically.
             self.stdout_handler.setLevel(logging.WARNING)
             logging.info(f"\n{table}")
+            self.stdout_handler.setLevel(logging.INFO)
+
+        # Log sample counts for ranking metrics
+        total_classified_samples = sum(self.batch_sizes)
+
+        # Calculate total TP, FP, FN for class 1 (positive edges)
+        tp_class1 = self.conf_mat_tp[1]
+        fp_class1 = self.conf_mat_fp[1]
+        fn_class1 = self.conf_mat_fn[1]
+
+        sample_info = (
+            f"Total samples: {total_classified_samples:,} "
+            f"(Class 1: TP={tp_class1}, FP={fp_class1}, FN={fn_class1}) | "
+            f"MAP: {total_map_samples:,} edges"
+        )
+        if self.verbose:
+            logging.info(sample_info)
+        else:
+            self.stdout_handler.setLevel(logging.WARNING)
+            logging.info(sample_info)
             self.stdout_handler.setLevel(logging.INFO)
 
         # Per-class metrics table
@@ -522,7 +557,6 @@ class Logger:
             "set": self.set,
             "timestamp": datetime.datetime.now().isoformat(),
             "loss": mean_loss,
-            "error": epoch_error,
             "metrics": {
                 "macro_precision": precision,
                 "macro_recall": recall,
@@ -532,12 +566,16 @@ class Logger:
                 "micro_f1": micro_f1,
                 "mrr": epoch_MRR,
                 "map": epoch_MAP,
+                "auc_roc": epoch_AUC,
             },
             "class_metrics": class_metrics,
-            "time_seconds": epoch_time,
         }
         self.metrics_history.append(epoch_metrics)
         self._save_metrics_json()
+
+        # Save predictions to .edg file if this is a TEST set
+        if self.set.startswith("TEST"):
+            self._save_predictions_to_edg()
 
         # Log to WandB
         if wandb.run:
@@ -552,7 +590,6 @@ class Logger:
                     {
                         f"{prefix}epoch": self.epoch,
                         f"{prefix}loss": mean_loss,
-                        f"{prefix}error": epoch_error,
                         f"{prefix}macro_precision": precision,
                         f"{prefix}macro_recall": recall,
                         f"{prefix}macro_f1": f1,
@@ -561,7 +598,7 @@ class Logger:
                         f"{prefix}micro_f1": micro_f1,
                         f"{prefix}mrr": epoch_MRR,
                         f"{prefix}map": epoch_MAP,
-                        f"{prefix}time_seconds": epoch_time,
+                        f"{prefix}auc_roc": epoch_AUC,
                         # Per-class metrics
                         **{
                             f"{prefix}class_{cl}_precision": m["precision"]
@@ -609,7 +646,7 @@ class Logger:
             # Concatenate edge indices and values
             all_edge_idx = torch.cat(self.pred_edges_idx, dim=1)  # [2, total_edges]
             all_edge_vals = torch.cat(self.pred_edges_vals, dim=0)  # [total_edges]
-            all_edge_probs = torch.cat(self.pred_edge_probs, dim=0)  # [total_edges]
+            torch.cat(self.pred_edge_probs, dim=0)  # [total_edges]
 
             # Compute metrics
             metrics = graph_metrics.GraphMetricsCalculator.compute_all_metrics(
@@ -622,8 +659,9 @@ class Logger:
             # Log to WandB
             if wandb.run:
                 try:
-                    # Use phase_idx as step to aggregate metrics across phases
-                    # This allows easy comparison of graph metrics across all phases
+                    # Use global_step to ensure monotonically increasing steps
+                    # phase_idx is included as a metric for tracking which phase this is
+                    self.global_step += 1
                     wandb.log(
                         {
                             "graph/avg_degree": metrics["average_degree"],
@@ -633,8 +671,9 @@ class Logger:
                             "graph/num_communities": metrics["num_communities"],
                             "graph/gcc_ratio": metrics["gcc_ratio"],
                             "graph/phase": phase_idx,  # For tracking which phase this is
+                            "graph/snapshot": snapshot_idx,
                         },
-                        step=phase_idx,
+                        step=self.global_step,
                     )
                 except Exception as e:
                     logging.warning(f"Failed to log graph metrics to WandB: {e}")
@@ -695,70 +734,190 @@ class Logger:
         logging.info(f"\n{table}")
 
     def _save_metrics_json(self):
-        """Save accumulated metrics to JSON file."""
-        if self.metrics_json_path:
-            try:
-                with open(self.metrics_json_path, "w", encoding="utf-8") as f:
-                    json.dump(self.metrics_history, f, indent=2, default=str)
-            except Exception as e:
-                logging.warning(f"Failed to save metrics JSON: {e}")
+        """Save metrics history to JSON file."""
+        try:
+            with open(self.metrics_json_path, "w") as f:
+                json.dump(self.metrics_history, f, indent=2)
+        except Exception as e:
+            logging.error(f"Failed to save metrics JSON: {e}")
 
-    def get_MRR(self, predictions, true_classes, adj, do_softmax=False):
-        """Calculate Mean Reciprocal Rank (MRR).
+    def _save_predictions_to_edg(self):
+        """Save TEST predictions to .edg file."""
+        # Check if we have accumulated predictions
+        if not hasattr(self, "pred_edges_idx") or len(self.pred_edges_idx) == 0:
+            logging.info("No TEST predictions to save")
+            return
+
+        try:
+            # Concatenate all predictions from batches
+            all_edge_idx = torch.cat(self.pred_edges_idx, dim=1)  # [2, total_edges]
+            all_edge_probs = torch.cat(self.pred_edge_probs, dim=0)  # [total_edges]
+            # all_edge_vals = torch.cat(self.pred_edges_vals, dim=0)  # [total_edges]
+            all_edge_labels = torch.cat(
+                self.pred_edges_labels, dim=0
+            )  # [total_edges] - ground truth
+
+            # Convert to numpy for easier handling
+            src_nodes = all_edge_idx[0].cpu().numpy()
+            dst_nodes = all_edge_idx[1].cpu().numpy()
+            probs = all_edge_probs.cpu().numpy()
+            labels = all_edge_labels.cpu().numpy()
+
+            # Create predictions directory if it doesn't exist
+            pred_dir = Path("log/predictions")
+            pred_dir.mkdir(parents=True, exist_ok=True)
+
+            # Generate filename with epoch and timestamp
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"predictions_{self.set.lower()}_epoch{self.epoch}_{timestamp}.edg"
+            filepath = pred_dir / filename
+
+            # Save all predictions (both positive and negative) with scores
+            with open(filepath, "w") as f:
+                f.write("# Source\tTarget\tProbability\tLabel\n")
+                for src, dst, prob, label in zip(src_nodes, dst_nodes, probs, labels):
+                    f.write(f"{src}\t{dst}\t{prob:.6f}\t{label}\n")
+
+            num_positive = (labels == 1).sum()
+            num_predicted_positive = (probs > 0.5).sum()
+            num_predicted_negative = (probs <= 0.5).sum()
+
+            logging.info(f"Saved predictions to {filepath}")
+            logging.info(
+                f"Total edges: {len(probs):,} | "
+                f"Positive labels: {num_positive:,} | "
+                f"Predicted positive: {num_predicted_positive:,} | "
+                f"Predicted negative: {num_predicted_negative:,}"
+            )
+
+            # Store filepath for potential reuse (e.g., loading best epoch predictions)
+            self.last_predictions_filepath = str(filepath)
+
+        except Exception as e:
+            logging.error(f"Failed to save predictions to .edg: {e}")
+
+    def get_MRR(self, predictions, true_classes, adj, filter_edges=None, do_softmax=False):
+        """Calculate Mean Reciprocal Rank (MRR) with filtered ranking.
+
+        Ranks ONLY among actually evaluated node pairs (no dense matrix).
+        This is the standard "filtered MRR" approach used in link prediction literature.
 
         Args:
             predictions: Model predictions.
             true_classes: Ground truth labels.
-            adj: Adjacency matrix indices.
+            adj: Adjacency matrix indices [2, N].
+            filter_edges: Optional edges from previous snapshot to exclude from ranking (remapped).
             do_softmax: Whether to apply softmax to predictions.
 
         Returns:
             Tensor: Mean Reciprocal Rank value.
         """
-        if do_softmax:
-            probs = torch.softmax(predictions, dim=1)[:, 1]
-        else:
-            probs = predictions
+        probs = torch.softmax(predictions, dim=1)[:, 1] if do_softmax else predictions
 
         probs = probs.detach().cpu().numpy()
         true_classes = true_classes.detach().cpu().numpy()
         adj = adj.detach().cpu().numpy()
 
-        pred_matrix = coo_matrix((probs, (adj[0], adj[1]))).toarray()
-        true_matrix = coo_matrix((true_classes, (adj[0], adj[1]))).toarray()
+        # Convert filter_edges to set for fast lookup
+        filter_set = set()
+        if filter_edges is not None and filter_edges.size(0) > 0:
+            filter_edges_np = filter_edges.detach().cpu().numpy()
+            if filter_edges_np.ndim == 2 and filter_edges_np.shape[0] > 0:
+                filter_set = set(map(tuple, filter_edges_np))
 
+        # adj format is [2, N] where adj[0] = src nodes, adj[1] = dst nodes
+        # Group edges by source node
+        from collections import defaultdict
+
+        node_edges = defaultdict(list)
+
+        for i in range(adj.shape[1]):
+            src = adj[0, i]
+            dst = adj[1, i]
+            prob = probs[i]
+            label = true_classes[i]
+            is_filter = (src, dst) in filter_set
+
+            node_edges[src].append(
+                {"dst": dst, "prob": prob, "label": label, "is_filter": is_filter}
+            )
+
+        # Calculate MRR for each source node that has at least one positive edge
         row_MRRs = []
-        for i, pred_row in enumerate(pred_matrix):
-            # check if there are any existing edges
-            if np.isin(1, true_matrix[i]):
-                row_MRRs.append(self.get_row_MRR(pred_row, true_matrix[i]))
+        for src, edges in node_edges.items():
+            # Check if this node has any positive edges
+            has_positive = any(e["label"] == 1 for e in edges)
+            if not has_positive:
+                continue
 
-        avg_MRR = torch.tensor(row_MRRs).mean() if len(row_MRRs) > 0 else torch.tensor(0.0)
-        return avg_MRR
+            # Filter out training edges (they shouldn't be ranked)
+            edges_to_rank = [e for e in edges if not e["is_filter"]]
 
-    def get_row_MRR(self, probs, true_classes):
-        """Calculate MRR for a single row (node).
+            if len(edges_to_rank) == 0:
+                continue
+
+            # Sort by probability descending
+            edges_to_rank.sort(key=lambda e: e["prob"], reverse=True)
+
+            # Find ranks of positive edges
+            reciprocal_ranks = []
+            for rank, edge in enumerate(edges_to_rank, start=1):
+                if edge["label"] == 1:
+                    reciprocal_ranks.append(1.0 / rank)
+
+            # Average reciprocal rank for this node
+            if len(reciprocal_ranks) > 0:
+                row_MRRs.append(np.mean(reciprocal_ranks))
+
+        # Store number of samples (nodes with at least one positive edge)
+        self._last_mrr_samples = len(row_MRRs)
+
+        return torch.tensor(row_MRRs).mean() if len(row_MRRs) > 0 else torch.tensor(0.0)
+
+    def get_row_MRR(self, probs, true_classes, filter_indices=None):
+        """Calculate MRR for a single row (node) with optional filtered ranking.
 
         Args:
             probs: Prediction probabilities for the row.
             true_classes: Ground truth labels for the row.
+            filter_indices: Optional array of node indices to exclude from ranking.
 
         Returns:
             float: MRR for this row.
         """
         existing_mask = true_classes == 1
 
+        # If we have filter indices, set their probabilities to -inf
+        # so they don't affect the ranking
+        probs_filtered = probs.copy()
+        if filter_indices is not None and len(filter_indices) > 0:
+            probs_filtered[filter_indices] = -np.inf
+
         # descending in probability
-        ordered_indices = np.flip(probs.argsort())
+        ordered_indices = np.flip(probs_filtered.argsort())
 
         ordered_existing_mask = existing_mask[ordered_indices]
 
-        existing_ranks = np.arange(1, true_classes.shape[0] + 1, dtype=float)[
-            ordered_existing_mask
-        ]
+        # Count only non-filtered positions for ranking
+        # This gives the "filtered rank" where training edges don't count
+        if filter_indices is not None and len(filter_indices) > 0:
+            # Create a mask of filtered positions in the ordered list
+            filtered_mask = np.isin(ordered_indices, filter_indices)
+            # Calculate cumulative count excluding filtered positions
+            valid_positions = ~filtered_mask
+            cumsum_valid = np.cumsum(valid_positions)
+            # Ranks are 1-based
+            existing_ranks = cumsum_valid[ordered_existing_mask].astype(float)
+        else:
+            # Standard ranking without filtering
+            existing_ranks = np.arange(1, true_classes.shape[0] + 1, dtype=float)[
+                ordered_existing_mask
+            ]
 
-        MRR = (1 / existing_ranks).sum() / existing_ranks.shape[0]
-        return MRR
+        if len(existing_ranks) == 0:
+            return 0.0
+
+        return (1 / existing_ranks).sum() / existing_ranks.shape[0]
 
     def get_MAP(self, predictions, true_classes, do_softmax=False):
         """Calculate Mean Average Precision (MAP).
@@ -771,15 +930,41 @@ class Logger:
         Returns:
             float: Mean Average Precision value.
         """
-        if do_softmax:
-            probs = torch.softmax(predictions, dim=1)[:, 1]
-        else:
-            probs = predictions
+        probs = torch.softmax(predictions, dim=1)[:, 1] if do_softmax else predictions
 
         predictions_np = probs.detach().cpu().numpy()
         true_classes_np = true_classes.detach().cpu().numpy()
 
         return average_precision_score(true_classes_np, predictions_np)
+
+    def get_AUC_ROC(self, predictions, true_classes, do_softmax=False):
+        """Calculate AUC-ROC on sampled negatives.
+
+        This computes AUC-ROC on the evaluated sample set (positive edges + sampled negatives),
+        NOT on all possible node pairs. This is the standard "sampling-based AUC" approach
+        used in link prediction literature for computational efficiency.
+
+        The metric measures how well the model distinguishes between:
+        - Real new edges (positive samples)
+        - Randomly sampled non-existent edges (negative samples with 1:1 ratio)
+
+        Note: This is NOT the "global AUC" over all N*(N-1)/2 possible pairs,
+        which would be computationally prohibitive for large graphs.
+
+        Args:
+            predictions: Model predictions (probabilities for positive class).
+            true_classes: Ground truth labels (0=negative, 1=positive).
+            do_softmax: Whether to apply softmax to predictions.
+
+        Returns:
+            float: AUC-ROC score on the sampled edge set.
+        """
+        probs = torch.softmax(predictions, dim=1)[:, 1] if do_softmax else predictions
+
+        predictions_np = probs.detach().cpu().numpy()
+        true_classes_np = true_classes.detach().cpu().numpy()
+
+        return roc_auc_score(true_classes_np, predictions_np)
 
     def eval_predicitions(self, predictions, true_classes, num_classes=2):
         """Evaluate predictions and compute confusion matrix metrics.
@@ -876,20 +1061,11 @@ class Logger:
         fn_sum = sum(fn.values()).item()
         fp_sum = sum(fp.values()).item()
 
-        if (tp_sum + fp_sum) == 0:
-            p = 0
-        else:
-            p = tp_sum * 1.0 / (tp_sum + fp_sum)
+        p = 0 if tp_sum + fp_sum == 0 else tp_sum * 1.0 / (tp_sum + fp_sum)
 
-        if (tp_sum + fn_sum) == 0:
-            r = 0
-        else:
-            r = tp_sum * 1.0 / (tp_sum + fn_sum)
+        r = 0 if tp_sum + fn_sum == 0 else tp_sum * 1.0 / (tp_sum + fn_sum)
 
-        if (p + r) > 0:
-            f1 = 2.0 * (p * r) / (p + r)
-        else:
-            f1 = 0
+        f1 = 2.0 * (p * r) / (p + r) if p + r > 0 else 0
         return p, r, f1
 
     def calc_eval_measures_per_class(self, tp, fn, fp, class_id):
@@ -921,10 +1097,7 @@ class Logger:
 
         p = tp_sum * 1.0 / (tp_sum + fp_sum)
         r = tp_sum * 1.0 / (tp_sum + fn_sum)
-        if (p + r) > 0:
-            f1 = 2.0 * (p * r) / (p + r)
-        else:
-            f1 = 0
+        f1 = 2.0 * (p * r) / (p + r) if p + r > 0 else 0
         return p, r, f1
 
     def calc_epoch_metric(self, batch_sizes, metric_val):

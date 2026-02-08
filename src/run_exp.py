@@ -21,7 +21,6 @@ from LinkPrediction import LinkPrediction
 # models
 import modeling.egcn_h as egcn_h
 import modeling.egcn_o as egcn_o
-import modeling.losses as losses
 import modeling.MLP as ClassifierHead
 import splitter as sp
 import trainer as tr
@@ -34,12 +33,6 @@ if __name__ == "__main__":
         default="experiments/parameters_example.yaml",
         type=argparse.FileType(mode="r"),
         help="optional, yaml file containing parameters to be used, overrides command line parameters",
-    )
-    parser.add_argument(
-        "--no-graph-viz",
-        action="store_true",
-        default=False,
-        help="Disable graph visualization PNG generation (saves time on large graphs)",
     )
     parser.add_argument(
         "--no-graph-metrics",
@@ -71,11 +64,8 @@ if __name__ == "__main__":
     tasker = LinkPrediction(args, dataset)
 
     # Set default finetune_epochs if not specified
-    if not hasattr(args, "finetune_epochs") or args.finetune_epochs is None:
-        args.finetune_epochs = max(args.num_epochs // 2, 5)
-        print(f"Using default finetune_epochs: {args.finetune_epochs}")
-    else:
-        args.finetune_epochs = int(args.finetune_epochs)
+    if not hasattr(args, "finetune_epochs"):
+        raise ValueError("Please specify 'finetune_epochs' in the configuration.")
 
     # build the incremental splitter
     if args.incremental:
@@ -108,7 +98,6 @@ if __name__ == "__main__":
     # build a loss
     weights = torch.tensor(args.class_weights, dtype=torch.float).to(args.device)
     loss = torch.nn.CrossEntropyLoss(weight=weights)
-    # loss = losses.FocalLoss(alpha=1.0, gamma=2.0, weight=weights)
 
     # trainer
     trainer = tr.Trainer(

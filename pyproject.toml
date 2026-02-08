@@ -40,10 +40,10 @@ src = ["src"]
 include = ["pyproject.toml", "src/**/*.py"]
 
 [tool.ruff.lint]
-extend-select = ["I"]  # Add import sorting
 # Enable all `pydocstyle` rules, limiting to those that adhere to the
 # Google convention via `convention = "google"`, below.
-select = ["D"]
+extend-select = ["D", "F", "Q", "RET", "SIM", "RSE", "PIE"]
+ignore = ["E402", "SIM113"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]

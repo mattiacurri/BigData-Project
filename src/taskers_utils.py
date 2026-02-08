@@ -105,8 +105,7 @@ def make_sparse_eye(size):
     eye_idx = torch.arange(size)
     eye_idx = torch.stack([eye_idx, eye_idx], dim=1).t()
     vals = torch.ones(size)
-    eye = torch.sparse_coo_tensor(eye_idx, vals, size=(size, size))
-    return eye
+    return torch.sparse_coo_tensor(eye_idx, vals, size=(size, size))
 
 
 def get_all_non_existing_edges(adj, tot_nodes):
@@ -122,7 +121,7 @@ def get_all_non_existing_edges(adj, tot_nodes):
     true_ids = adj["idx"].t().numpy()
     true_ids_set = set(get_edges_ids(true_ids, tot_nodes))
 
-    # total_possible = tot_nodes * tot_nodes - num_positive
+    # total_possible are tot_nodes * tot_nodes - num_positive
 
     all_edges_idx = np.arange(tot_nodes)
     all_edges_idx = np.array(np.meshgrid(all_edges_idx, all_edges_idx)).reshape(2, -1)
@@ -150,7 +149,7 @@ def get_non_existing_edges(adj, number, tot_nodes, existing_nodes=None):
     Returns:
         Dict with sampled non-existing edges.
     """
-    t0 = time.time()
+    time.time()
     idx = adj["idx"].t().numpy()
     true_ids = get_edges_ids(idx, tot_nodes)
 
@@ -164,10 +163,7 @@ def get_non_existing_edges(adj, number, tot_nodes, existing_nodes=None):
     from_id = np.random.choice(idx[0], size=num_candidates, replace=True)
     to_id = np.random.choice(existing_nodes, size=num_candidates, replace=True)
 
-    if num_candidates > 1:
-        edges = np.stack([from_id, to_id])
-    else:
-        edges = np.concatenate([from_id, to_id])
+    edges = np.stack([from_id, to_id]) if num_candidates > 1 else np.concatenate([from_id, to_id])
 
     edge_ids = edges[0] * tot_nodes + edges[1]
 

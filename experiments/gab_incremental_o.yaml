@@ -6,15 +6,15 @@ gab_args:
 
 use_cuda: True
 
-model: egcn_h # egcn_h
+model: egcn_o # egcn_h
 
 class_weights: [0.5, 0.5] #[0.05, 0.95]
 save_node_embeddings: False # TODO: set to True when we have stable training
 
 incremental: True
 
-finetune_epochs: 10  # Number of epochs for fine-tuning phases (after initial training)
-num_epochs: 10  # Number of epochs for initial training
+finetune_epochs: 100  # Number of epochs for fine-tuning phases (after initial training)
+num_epochs: 100  # Number of epochs for initial training
 steps_accum_gradients: 1
 learning_rate: 0.0001
 negative_mult_training: 1 # num_negatives = 1 * num_positives
