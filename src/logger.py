@@ -2,11 +2,10 @@
 
 Provides comprehensive logging of training progress, evaluation metrics including
 precision, recall, F1-score, MAP, and AUC-ROC across different datasets and phases.
-Features: colored console output, timestamps, JSON metrics export, ASCII tables.
+Features: colored console output, timestamps, ASCII tables.
 """
 
 import datetime
-import json
 import logging
 import os
 from pathlib import Path
@@ -134,14 +133,11 @@ class Logger:
             num_classes: Number of classes for classification tasks.
             minibatch_log_interval: Interval (in batches) for logging during training.
         """
-        self.metrics_history = []  # Store metrics for JSON export
-
         if args is not None:
             currdate = str(datetime.datetime.today().strftime("%Y%m%d%H%M%S"))
             self.log_name = (
                 "log/log_" + args.data + "_" + args.model + "_" + currdate + "_r" + ".log"
             )
-            self.metrics_json_path = self.log_name.replace(".log", "_metrics.json")
 
             # Setup logging to BOTH stdout and file
             os.makedirs("log", exist_ok=True)
@@ -173,7 +169,6 @@ class Logger:
 
         else:
             self.log_name = None
-            self.metrics_json_path = None
             print("Log: STDOUT only")
             logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 
@@ -524,28 +519,6 @@ class Logger:
             logging.info(f"\n{class_table}")
             self.stdout_handler.setLevel(logging.INFO)
 
-        # Save to JSON
-        epoch_metrics = {
-            "epoch": self.epoch,
-            "set": self.set,
-            "timestamp": datetime.datetime.now().isoformat(),
-            "loss": mean_loss,
-            "metrics": {
-                "macro_precision": precision,
-                "macro_recall": recall,
-                "macro_f1": f1,
-                "map": epoch_MAP,
-                "auc_roc": epoch_AUC,
-            },
-            "class_metrics": class_metrics,
-        }
-        self.metrics_history.append(epoch_metrics)
-        self._save_metrics_json()
-
-        # Save predictions to .edg file if this is a TEST set
-        if self.set.startswith("TEST"):
-            self._save_predictions_to_edg()
-
         # Log to WandB
         if wandb.run:
             try:
@@ -554,6 +527,9 @@ class Logger:
 
                 # Increment global step for epoch-level logging
                 self.global_step += 1
+
+                # Get current timestamp
+                timestamp = datetime.datetime.now().isoformat()
 
                 wandb.log(
                     {
@@ -564,6 +540,9 @@ class Logger:
                         f"{prefix}macro_f1": f1,
                         f"{prefix}map": epoch_MAP,
                         f"{prefix}auc_roc": epoch_AUC,
+                        f"{prefix}timestamp": timestamp,
+                        f"{prefix}total_samples": total_classified_samples,
+                        f"{prefix}map_samples": total_map_samples,
                         # Per-class metrics
                         **{
                             f"{prefix}class_{cl}_precision": m["precision"]
@@ -574,6 +553,10 @@ class Logger:
                             for cl, m in class_metrics.items()
                         },
                         **{f"{prefix}class_{cl}_f1": m["f1"] for cl, m in class_metrics.items()},
+                        # Confusion matrix for class 1
+                        f"{prefix}tp_class1": tp_class1,
+                        f"{prefix}fp_class1": fp_class1,
+                        f"{prefix}fn_class1": fn_class1,
                     },
                     step=self.global_step,
                 )
@@ -627,6 +610,7 @@ class Logger:
                     # Use global_step to ensure monotonically increasing steps
                     # phase_idx is included as a metric for tracking which phase this is
                     self.global_step += 1
+                    timestamp = datetime.datetime.now().isoformat()
                     wandb.log(
                         {
                             "graph/avg_degree": metrics["average_degree"],
@@ -635,25 +619,17 @@ class Logger:
                             "graph/avg_clustering": metrics["average_clustering"],
                             "graph/num_communities": metrics["num_communities"],
                             "graph/gcc_ratio": metrics["gcc_ratio"],
+                            "graph/gcc_size": metrics["gcc_size"],
+                            "graph/total_nodes": metrics["total_nodes"],
                             "graph/phase": phase_idx,  # For tracking which phase this is
                             "graph/snapshot": snapshot_idx,
+                            "graph/epoch": self.epoch,
+                            "graph/timestamp": timestamp,
                         },
                         step=self.global_step,
                     )
                 except Exception as e:
                     logging.warning(f"Failed to log graph metrics to WandB: {e}")
-
-            # Save to history for JSON export
-            graph_epoch_metrics = {
-                "epoch": self.epoch,
-                "phase": phase_idx,
-                "snapshot": snapshot_idx,
-                "set": "GRAPH_METRICS",
-                "timestamp": datetime.datetime.now().isoformat(),
-                "metrics": metrics,
-            }
-            self.metrics_history.append(graph_epoch_metrics)
-            self._save_metrics_json()
 
             # Note: We do NOT clear the buffers here
             # The trainer needs them in _save_phase_graphs to save graph files
@@ -697,14 +673,6 @@ class Logger:
             headers, [values], title=f"Graph Metrics | Phase {phase_idx} | Snapshot {snapshot_idx}"
         )
         logging.info(f"\n{table}")
-
-    def _save_metrics_json(self):
-        """Save metrics history to JSON file."""
-        try:
-            with open(self.metrics_json_path, "w") as f:
-                json.dump(self.metrics_history, f, indent=2)
-        except Exception as e:
-            logging.error(f"Failed to save metrics JSON: {e}")
 
     def _save_predictions_to_edg(self):
         """Save TEST predictions to .edg file."""
