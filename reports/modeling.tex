@@ -82,8 +82,83 @@ H_t^{(l+1)} &= \text{GCONV}(A_t, H_t^{(l)}, W_t^{(l)})
 
 In the -H version, the GCN weights are treated as hidden states of the recurrent architecture; in the -O version, these weights are treated as input/outputs. Chaining the units bottom-up creates a GCN with multiple layers for one time step, and unrolling over time horizontally forms a lattice on which information ($H_t^{(l)}$ and $W_t^{(l)}$) flows.
 
-\section{Generate Test Design} 
+\section{Generate Test Design}
 
-\section{Build Model} 
+\subsection{Metrics}
+\begin{itemize}
+    \item \textbf{Classical:} Precision, Recall, F1-Score, AUC-ROC, MAP.
+    \item \textbf{Graph-based:} Average Degree, Clustering Coefficient, Modularity, Community structure, GCC ratio.
+\end{itemize}
+
+We compute these metrics both on the final graph obtained from the snapshots and on the graph
+restricted to synthetic nodes (i.e., the graph used to complete the synthetic dataset).
+
+\subsection{Experiments}
+Planned experiments: degree-based features; embedding-based features; embedding features in a
+"live-update" setting (if feasible). Model variants: both the H and O versions, when possible.
+
+\subsection{Examples of network metrics}
+\paragraph{Facebook Social Circles}
+Average Degree: 43.6910; Average Shortest Path: 3.6925; Modularity: 0.8348.
+
+\paragraph{Twitter Social Circles}
+Average Degree: 21.75; Modularity: 0.8042; Average Shortest Path: 4.9058.\\
+Nodes: 81\,306; Edges: 1\,768\,149.
+
+\paragraph{Google+ Social Circles}
+Average Degree: 127.06; Modularity: 0.4742; Average Shortest Path: 3.3163.\\
+Nodes: 107\,614; Edges: 13\,673\,453.
+
+\subsection{Description of metrics}
+We analyze graphs using three fundamental metrics:
+\begin{itemize}
+    \item \textbf{Average Degree:} the mean number of connections per node. For undirected graphs
+    $$\text{AvgDeg} = \frac{2|E|}{|V|},$$
+    while for directed graphs we use $$\text{AvgDeg} = \frac{|E|}{|V|},$$
+    where $|E|$ and $|V|$ denote the number of edges and vertices, respectively.
+    \item \textbf{Average Shortest Path:} the average number of hops between all pairs of reachable nodes
+    within the largest connected component (LCC). For directed graphs we consider weakly connected components.
+    \item \textbf{Modularity:} a measure of community structure quality, typically ranging from -1 to 1.
+    High positive values (e.g., > 0.3) indicate strong community structure. We compute modularity using
+    the Louvain algorithm; for directed graphs we first convert to an undirected representation.
+\end{itemize}
+\section{Build Model}
+
+In this project, we explored two distinct training pipelines using the H variant of the EvolveGCN architecture.
+
+\subsection{Standard Implementation}
+
+The first methodology closely follows the reference implementation of EvolveGCN:
+
+\begin{itemize}
+    \item \textbf{Data Splitting}: Employs a standard proportion-based split or Leave-One-Out Cross-Validation (LOOCV). The timeline is divided into fixed blocks: typically the first 70\% for training, 10\% for validation, and 20\% for testing.
+    \item \textbf{Sequence-based Training}: The model processes the entire training sequence in a single batch or over multiple epochs. It learns the "average" dynamics of the training set but remains static once the training phase is complete.
+    \item \textbf{Memory Management}: Uses a fixed global node index system. While simpler to implement, it can become inefficient for graphs with a large total number of nodes where only a small subset is active at any given time step.
+    \item \textbf{Initialization}: Adheres to \textit{Kaiming} initialization for weight matrices.
+\end{itemize}
+
+\subsection{Incremental Implementation}
+
+The second methodology is an adapted version designed specifically for \textit{incremental learning} considering the cumulative assumption of our dataset. 
+
+\subsubsection{Training Strategy: Snapshot-by-Snapshot Adaptation}
+
+Unlike the static approach, the incremental implementation uses a \textbf{Phase-based Training} workflow. The timeline is discretized into multiple temporal snapshots $\{S_0, S_1, \dots, S_n\}$. In each training phase $i$:
+\begin{enumerate}
+    \item The model is initialized with the weights from the previous phase $i-1$.
+    \item It is fine-tuned or trained on the current snapshot $S_i$ (representing "today's" graph).
+    \item It is immediately evaluated on its ability to predict links in the subsequent snapshot $S_{i+1}$ (representing "tomorrow's" graph).
+\end{enumerate}
+
+So, instead of passing to the model all the training snapshot data at once, we train it incrementally on each snapshot, allowing it to adapt its weights on the single snapshot and then immediately test its performance on the next snapshot. This simulates a real-world scenario where the model must adapt to new data as it arrives, rather than relying on a static training set.
+
+\subsubsection{Walk-Forward (Rolling) Evaluation}
+
+To accurately measure performance in a dynamic environment, we implement \textbf{Walk-Forward Validation}. This mimics a real-world deployment scenario:
+\begin{itemize}
+    \item \textbf{Future Prediction}: For every snapshot $t$, the model's performance is reported based on its prediction accuracy for snapshot $t+1$.
+    \item \textbf{Evaluation Metrics}: We track traditional link prediction metrics (AUC-ROC, Mean Average Precision) alongside structural graph metrics (Modularity, GCC, Community Detection) for each predicted graph window.
+\end{itemize}
+
 
 \section{Assess Model}

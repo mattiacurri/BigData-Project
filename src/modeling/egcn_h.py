@@ -227,7 +227,7 @@ class TopK(torch.nn.Module):
         Returns:
             Weighted embeddings of top-K nodes.
         """
-        scores = node_embs.matmul(self.scorer) / (self.scorer.norm() + 1e-8)
+        scores = node_embs.matmul(self.scorer) / self.scorer.norm()
         scores = scores + mask
 
         vals, topk_indices = scores.view(-1).topk(self.k)

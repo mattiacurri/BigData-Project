@@ -3,7 +3,6 @@
 Provides functions for graph manipulation, feature generation, and edge sampling.
 """
 
-import time
 from types import SimpleNamespace
 
 import numpy as np
@@ -149,7 +148,6 @@ def get_non_existing_edges(adj, number, tot_nodes, existing_nodes=None):
     Returns:
         Dict with sampled non-existing edges.
     """
-    time.time()
     idx = adj["idx"].t().numpy()
     true_ids = get_edges_ids(idx, tot_nodes)
 

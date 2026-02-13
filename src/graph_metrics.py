@@ -18,9 +18,11 @@ Supported Metrics:
 5. Number of Communities - Count of detected communities
 """
 
+import time
 from typing import Dict, Optional, Tuple
 import warnings
 
+import matplotlib.pyplot as plt
 import networkx as nx
 from networkx.algorithms import community
 import torch
@@ -582,3 +584,316 @@ class GraphMetricsCalculator:
         # Write to GraphML file
         # NetworkX handles the XML structure automatically
         nx.write_graphml(G_copy, filepath)
+
+    @staticmethod
+    def visualize_gcc(
+        G: nx.Graph, communities: Dict[int, int], filepath: str, title: Optional[str] = None
+    ) -> None:
+        """Create visualization of the giant connected component.
+
+        Parameters
+        ----------
+        G : nx.Graph
+            Input graph (typically the full predicted graph)
+        communities : dict
+            Dictionary mapping node IDs to community IDs for coloring
+        filepath : str
+            Output image file path (should end in .png)
+        title : str, optional
+            Plot title displayed at the top of the figure
+
+        Notes:
+        -----
+        Visualization Features:
+        -----------------------
+        1. GCC Extraction: We visualize only the Giant Connected Component
+           to avoid visual clutter from isolated nodes/small components
+
+        2. Layout Algorithm:
+           - Primary: Kamada-Kawai (force-directed, better for communities)
+           - Fallback: Spring layout if Kamada-Kawai fails
+           - Both algorithms spread nodes to reveal community structure
+
+        3. Node Coloring:
+           - Colors based on community membership (from Louvain algorithm)
+           - Uses Set3 colormap for distinguishable colors
+           - Makes community boundaries visually apparent
+
+        4. Node Sizes:
+           - Proportional to node degree (importance in network)
+           - Larger nodes = more connections = more influential users
+           - Size range: 300 (low degree) to 1000 (high degree)
+
+        5. Edge Styling:
+           - Transparency (alpha) proportional to edge probability
+           - High probability edges = darker, more visible
+           - Low probability edges = lighter, background
+           - Gray color for neutrality
+
+        6. Labels:
+           - Only shown for high-degree nodes (>70% of max degree)
+           - Prevents label clutter while highlighting important nodes
+           - Font size 8 for readability
+
+        7. Node Sampling (Performance Optimization):
+           - For GCCs with > 1000 nodes, we sample only the top 1000 nodes by degree
+           - This ensures reasonable computation time (layout algorithms are O(n²))
+           - Prevents visual clutter and memory issues with very large graphs
+           - The sampled nodes represent the core/hub structure of the network
+           - Full graph data is always preserved in the .graphml file
+
+        OUTPUT:
+        - High-resolution PNG (300 DPI) suitable for papers/reports
+        - White background for professional appearance
+        - Tight layout to maximize graph area
+        - Closed figure to free memory
+
+        INTERPRETATION:
+        - Clusters of same-colored nodes = communities
+        - Large nodes = hub users/important connectors
+        - Dense regions = tightly knit groups
+        - Sparse connections between clusters = community boundaries
+
+        This visualization provides immediate visual insight into the
+        predicted social network structure at each training phase.
+        """
+        import logging
+
+        total_start_time = time.time()
+        logging.info("  [VIZ] Starting GCC visualization...")
+
+        # Extract GCC for visualization
+        # Visualizing the full graph with many disconnected components
+        # would be cluttered and hard to interpret
+        start_time = time.time()
+        gcc = GraphMetricsCalculator.get_giant_connected_component(G)
+        gcc_time = time.time() - start_time
+        logging.info(
+            f"  [VIZ] GCC extraction: {gcc.number_of_nodes()} nodes, {gcc.number_of_edges()} edges ({gcc_time:.2f}s)"
+        )
+
+        if gcc.number_of_nodes() == 0:
+            warnings.warn("Giant connected component is empty, skipping visualization")
+            return
+
+        # PERFORMANCE OPTIMIZATION: Sample top nodes by degree for large graphs
+        # For very large GCCs, visualizing all nodes is:
+        # 1. Extremely slow (layout algorithms are O(n^2) or worse)
+        # 2. Visually cluttered and hard to interpret
+        # 3. Memory intensive
+        # We keep the top 200 nodes by degree as they represent the core structure
+        # HARDCODED: 200 nodes max for visualization
+        MAX_VIZ_NODES = 200
+        if gcc.number_of_nodes() > MAX_VIZ_NODES:
+            start_time = time.time()
+            # Calculate degrees and get top nodes
+            degrees = dict(gcc.degree())
+            top_nodes = sorted(degrees.keys(), key=lambda n: degrees[n], reverse=True)[
+                :MAX_VIZ_NODES
+            ]
+
+            # Create subgraph with only top nodes
+            gcc = gcc.subgraph(top_nodes).copy()
+
+            # Update communities dict to only include sampled nodes
+            communities = {k: v for k, v in communities.items() if k in top_nodes}
+
+            sampling_time = time.time() - start_time
+            logging.info(
+                f"  [VIZ] Sampled top {MAX_VIZ_NODES} nodes by degree ({sampling_time:.2f}s)"
+            )
+            logging.info(
+                f"  [VIZ] Sampled GCC: {gcc.number_of_nodes()} nodes, {gcc.number_of_edges()} edges"
+            )
+
+        # Set up the plot with reasonable figure size
+        # 12x10 inches provides good detail while fitting on standard screens
+        plt.figure(figsize=(12, 10))
+
+        # Choose layout algorithm based on graph size (HARDCODED)
+        # Kamada-Kawai: beautiful but slow O(n³), only for small graphs (≤50 nodes)
+        # Spring layout: faster O(n²), used for larger graphs (51-200 nodes)
+        KAMADA_KAWAI_THRESHOLD = 50
+        start_time = time.time()
+
+        if gcc.number_of_nodes() <= KAMADA_KAWAI_THRESHOLD:
+            # Use Kamada-Kawai for small graphs (≤50 nodes) - best aesthetics
+            try:
+                logging.info(
+                    f"  [VIZ] Computing Kamada-Kawai layout (n={gcc.number_of_nodes()} ≤ {KAMADA_KAWAI_THRESHOLD})..."
+                )
+                pos = nx.kamada_kawai_layout(gcc)
+                logging.info(
+                    f"  [VIZ] Kamada-Kawai layout computed ({time.time() - start_time:.2f}s)"
+                )
+            except Exception as e:
+                logging.warning(f"  [VIZ] Kamada-Kawai failed ({e}), using spring layout...")
+                pos = nx.spring_layout(gcc, k=1, iterations=50, seed=42)
+                logging.info(f"  [VIZ] Spring layout computed ({time.time() - start_time:.2f}s)")
+        else:
+            # Use Spring layout for larger graphs (51-200 nodes) - much faster
+            logging.info(
+                f"  [VIZ] Computing Spring layout (n={gcc.number_of_nodes()} > {KAMADA_KAWAI_THRESHOLD})..."
+            )
+            pos = nx.spring_layout(gcc, k=1, iterations=50, seed=42)
+            logging.info(f"  [VIZ] Spring layout computed ({time.time() - start_time:.2f}s)")
+
+        # Prepare node colors based on community membership
+        # Each community gets a distinct color from the Set3 colormap
+        start_time = time.time()
+        if communities:
+            node_colors = []
+            for node in gcc.nodes():
+                # Get community ID, default to -1 if not found
+                comm_id = communities.get(node, -1)
+                node_colors.append(comm_id)
+        else:
+            # If no communities provided, use uniform light blue
+            node_colors = "lightblue"
+        logging.info(f"  [VIZ] Node colors prepared ({time.time() - start_time:.2f}s)")
+
+        # Prepare node sizes proportional to degree
+        # This highlights important/hub nodes in the network
+        start_time = time.time()
+        degrees = dict(gcc.degree())
+        max_degree = max(degrees.values()) if degrees else 1
+        # Scale from 300 to 1000 based on relative degree
+        node_sizes = [300 + 700 * (degrees[node] / max_degree) for node in gcc.nodes()]
+        logging.info(f"  [VIZ] Node sizes prepared ({time.time() - start_time:.2f}s)")
+
+        # OPTIMIZED: Prepare edges in 3 groups by probability (much faster than individual)
+        # Grouping by probability allows batch drawing (3 calls instead of N calls)
+        # HARDCODED: 3 groups - High (>0.7), Medium (0.3-0.7), Low (<0.3)
+        start_time = time.time()
+        high_prob_edges = []
+        med_prob_edges = []
+        low_prob_edges = []
+
+        for source, target in gcc.edges():
+            # Get probability if available
+            if "probability" in gcc.edges[source, target]:
+                prob = gcc.edges[source, target]["probability"]
+            else:
+                prob = 0.5  # Default if no probability
+
+            # Group by probability thresholds
+            if prob > 0.7:
+                high_prob_edges.append((source, target))
+            elif prob > 0.3:
+                med_prob_edges.append((source, target))
+            else:
+                low_prob_edges.append((source, target))
+
+        logging.info(
+            f"  [VIZ] Edges grouped by probability: "
+            f"{len(high_prob_edges)} high, {len(med_prob_edges)} med, {len(low_prob_edges)} low "
+            f"({time.time() - start_time:.2f}s)"
+        )
+
+        # Draw nodes first (so edges appear on top)
+        start_time = time.time()
+        if isinstance(node_colors, list) and len(set(node_colors)) > 1:
+            # Multiple communities - use colormap
+            cmap = plt.cm.Set3
+            nx.draw_networkx_nodes(
+                gcc, pos, node_color=node_colors, node_size=node_sizes, cmap=cmap, alpha=0.8
+            )
+        else:
+            # Single color
+            nx.draw_networkx_nodes(
+                gcc, pos, node_color=node_colors, node_size=node_sizes, alpha=0.8
+            )
+        logging.info(f"  [VIZ] Nodes drawn ({time.time() - start_time:.2f}s)")
+
+        # OPTIMIZED: Draw edges in 3 batches by probability (much faster!)
+        # High probability = black, thick
+        # Medium probability = gray, medium
+        # Low probability = light gray, thin
+        start_time = time.time()
+
+        # Low probability edges (background) - draw first
+        if low_prob_edges:
+            nx.draw_networkx_edges(
+                gcc,
+                pos,
+                edgelist=low_prob_edges,
+                width=0.5,
+                alpha=0.3,
+                edge_color="lightgray",
+                arrows=True,
+                arrowsize=8,
+                arrowstyle="->",
+            )
+
+        # Medium probability edges
+        if med_prob_edges:
+            nx.draw_networkx_edges(
+                gcc,
+                pos,
+                edgelist=med_prob_edges,
+                width=1.0,
+                alpha=0.6,
+                edge_color="gray",
+                arrows=True,
+                arrowsize=10,
+                arrowstyle="->",
+            )
+
+        # High probability edges (foreground) - draw last
+        if high_prob_edges:
+            nx.draw_networkx_edges(
+                gcc,
+                pos,
+                edgelist=high_prob_edges,
+                width=2.0,
+                alpha=0.9,
+                edge_color="black",
+                arrows=True,
+                arrowsize=12,
+                arrowstyle="->",
+            )
+
+        logging.info(f"  [VIZ] Edges drawn in 3 batches ({time.time() - start_time:.2f}s)")
+
+        # Add labels for high-degree nodes (potential hubs/influencers)
+        # Only label nodes with degree > 70% of maximum to avoid clutter
+        start_time = time.time()
+        high_degree_threshold = max_degree * 0.7
+        high_degree_nodes = {
+            node: str(node) for node, deg in degrees.items() if deg > high_degree_threshold
+        }
+        if high_degree_nodes:
+            nx.draw_networkx_labels(
+                gcc, pos, labels=high_degree_nodes, font_size=8, font_color="black"
+            )
+        logging.info(f"  [VIZ] Labels added ({time.time() - start_time:.2f}s)")
+
+        # Set title and formatting
+        start_time = time.time()
+        if title:
+            plt.title(title, fontsize=16, fontweight="bold", pad=20)
+        else:
+            # Default title with graph statistics
+            num_comms = len(set(node_colors)) if isinstance(node_colors, list) else 0
+            default_title = (
+                f"Giant Connected Component\n"
+                f"{gcc.number_of_nodes()} nodes, {gcc.number_of_edges()} edges, "
+                f"{num_comms} communities"
+            )
+            plt.title(default_title, fontsize=14, pad=20)
+
+        # Remove axis for cleaner look
+        plt.axis("off")
+        plt.tight_layout()
+        logging.info(f"  [VIZ] Title and layout formatting ({time.time() - start_time:.2f}s)")
+
+        # Save with high resolution (300 DPI) for publication quality
+        start_time = time.time()
+        plt.savefig(filepath, dpi=300, bbox_inches="tight", facecolor="white")
+        save_time = time.time() - start_time
+        logging.info(f"  [VIZ] Image saved to {filepath} ({save_time:.2f}s)")
+
+        total_time = time.time() - total_start_time
+        logging.info(f"  [VIZ] TOTAL visualization time: {total_time:.2f}s")
+
+        plt.close()  # Close figure to free memory

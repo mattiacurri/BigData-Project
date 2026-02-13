@@ -27,7 +27,13 @@ class GabDataset:
 
         self.folder_path = Path(self.args_gab.folder)
         self.raw_folder = self.folder_path / "raw"
-        self.time_periods = sorted([d.name for d in self.raw_folder.iterdir() if d.is_dir()])
+        self.time_periods = sorted(
+            [
+                d.name
+                for d in self.raw_folder.iterdir()
+                if d.is_dir() and "synthetic" not in d.name.lower()
+            ]
+        )
         self.loaded_snapshots = set()  # Track which snapshots have been loaded
 
         self.ecols = SimpleNamespace(FromNodeId=0, ToNodeId=1, TimeStep=2)

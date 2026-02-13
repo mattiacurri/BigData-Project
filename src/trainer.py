@@ -68,11 +68,13 @@ class Trainer:
         self.gcn_opt.zero_grad()
         self.classifier_opt.zero_grad()
 
-    def load_checkpoint(self, filename: str) -> dict:
+    def load_checkpoint(self, filename: str, load_optimizer_state: bool = True) -> dict:
         """Load model checkpoint.
 
         Args:
             filename: Checkpoint file path.
+            load_optimizer_state: If True, load optimizer state. If False, only load model weights.
+                                  Setting to False enables classic fine-tuning with fresh optimizer state.
 
         Returns:
             dict: The loaded checkpoint dictionary, or empty dict if not found.
@@ -83,10 +85,16 @@ class Trainer:
             self.gcn.load_state_dict(checkpoint["gcn_dict"])
             self.classifier.load_state_dict(checkpoint["classifier_dict"])
 
-            self.gcn_opt.load_state_dict(checkpoint["gcn_optimizer"])
-            self.classifier_opt.load_state_dict(checkpoint["classifier_optimizer"])
+            if load_optimizer_state:
+                self.gcn_opt.load_state_dict(checkpoint["gcn_optimizer"])
+                self.classifier_opt.load_state_dict(checkpoint["classifier_optimizer"])
+                optimizer_status = "with optimizer state"
+            else:
+                # Reinitialize optimizers for classic fine-tuning (fresh momentum/adaptive rates)
+                self.init_optimizers(self.args)
+                optimizer_status = "with RESET optimizer (classic fine-tuning)"
 
-            msg = f"=> loaded checkpoint '{filename}' (epoch {checkpoint['epoch']})"
+            msg = f"=> loaded checkpoint '{filename}' (epoch {checkpoint['epoch']}) {optimizer_status}"
             if "best_test_metric" in checkpoint:
                 msg += f" | metric {checkpoint['best_test_metric']:.4f}"
             self.logger.log_str(msg)
@@ -166,24 +174,26 @@ class Trainer:
                 s.hist_adj_list, s.hist_ndFeats_list, s.label_sp["idx"], s.node_mask_list
             )
 
-            loss = self.comp_loss(predictions, s.label_sp["vals"])
+            loss = (
+                None
+                if set_name.startswith("TEST")
+                else self.comp_loss(predictions, s.label_sp["vals"])
+            )
 
             if grad:
                 self.optim_step(loss)
 
             # Update metrics and progress bar
-            running_loss = (running_loss * i + loss.item()) / (i + 1)
-            pbar.set_postfix(loss=f"{running_loss:.4f}")
+            if loss is not None:
+                running_loss = (running_loss * i + loss.item()) / (i + 1)
+                pbar.set_postfix(loss=f"{running_loss:.4f}")
 
-            # Pass filter_edges for filtered ranking (if available)
-            log_kwargs = {"adj": s.label_sp["idx"]}
-            if hasattr(s, "filter_edges"):
-                log_kwargs["filter_edges"] = s.filter_edges
-
-            self.logger.log_minibatch(predictions, s.label_sp["vals"], loss.detach(), **log_kwargs)
+            self.logger.log_minibatch(predictions, s.label_sp["vals"], loss, adj=s.label_sp["idx"])
 
             # Force cleanup to prevent memory accumulation
-            del predictions, loss
+            del predictions
+            if loss is not None:
+                del loss
             if nodes_embs is not None and not self.args.save_node_embeddings:
                 nodes_embs = None
 
@@ -374,10 +384,10 @@ class Trainer:
 
         for phase_idx, (train_snapshot, test_snapshot) in enumerate(train_test_pairs):
             # Construct phase description
-            # train_snapshots[i] uses time step (valid_start + i) as the prediction target
-            # test_snapshots[i+1] uses time step (valid_start + i + 1) as the prediction target
-            train_time_step = self.splitter.valid_start + phase_idx
-            test_time_step = self.splitter.valid_start + phase_idx + 1
+            # train_snapshots[i] corresponds to time step (i+1) due to history requirements
+            # We train on time step (phase_idx + 1) and test on (phase_idx + 2)
+            train_time_step = phase_idx + 1
+            test_time_step = phase_idx + 2
             phase_desc = f"Train on snapshot {train_time_step}, test on snapshot {test_time_step}"
 
             print(f"\n{'=' * 60}")
@@ -391,7 +401,12 @@ class Trainer:
             )
             if os.path.isfile(best_checkpoint_path):
                 print(f"\n  Loading best checkpoint from phase {prev_phase}...")
-                self.load_checkpoint(best_checkpoint_path)
+                # Use reset_optimizer_on_finetune flag to control optimizer state loading
+                # True = classic fine-tuning (fresh optimizer), False = continue training (keep momentum)
+                reset_optimizer = getattr(self.args, "reset_optimizer_on_finetune", True)
+                self.load_checkpoint(
+                    best_checkpoint_path, load_optimizer_state=not reset_optimizer
+                )
             else:
                 print(f"  Warning: Best checkpoint not found at {best_checkpoint_path}")
                 print("  Continuing with current model state...")
@@ -409,6 +424,10 @@ class Trainer:
 
         # Print summary of all phases
         self._print_incremental_summary(all_results)
+
+        # Save final predictions from the best model of the last phase
+        self._save_final_predictions(all_results)
+
         return all_results
 
     def _run_incremental_phase(
@@ -499,9 +518,6 @@ class Trainer:
                     "classifier_dict": self.classifier.state_dict(),
                     "gcn_optimizer": self.gcn_opt.state_dict(),
                     "classifier_optimizer": self.classifier_opt.state_dict(),
-                    "predictions_filepath": getattr(
-                        self.logger, "last_predictions_filepath", None
-                    ),
                 }
                 torch.save(checkpoint_data, checkpoint_path)
             else:
@@ -512,115 +528,9 @@ class Trainer:
 
         target_measure = getattr(self.args, "target_measure", "metric")
         print(f"\n[{phase_desc}] completed:")
-        print(f" Best test {target_measure}: {best_eval_test:.4f} at epoch {best_epoch}")
-
-        # Compute and save graph structure metrics at the end of the phase (if enabled)
-        # This captures the properties of the predicted graph from the BEST epoch
-        if not getattr(self.args, "no_graph_metrics", False):
-            print(f"\nComputing graph structure metrics for {phase_desc}...")
-            try:
-                # Load the best checkpoint to ensure metrics are computed on best model
-                log_dir = getattr(self.args, "log_dir", "log/")
-                checkpoint_path = os.path.join(
-                    log_dir, f"checkpoint_phase_{phase_idx}_best.pth.tar"
-                )
-
-                if os.path.exists(checkpoint_path):
-                    print(f"Loading best checkpoint from epoch {best_epoch}...")
-                    checkpoint = torch.load(checkpoint_path, map_location=self.args.device)
-
-                    # Load predictions from saved .edg file instead of re-running
-                    predictions_filepath = checkpoint.get("predictions_filepath")
-                    if predictions_filepath and os.path.exists(predictions_filepath):
-                        self._load_predictions_from_edg(predictions_filepath)
-                    else:
-                        print("Warning: Predictions file not found, skipping graph metrics")
-                        graph_metrics = {}
-                        phase_results["graph_metrics"] = graph_metrics
-                        return phase_results
-                else:
-                    print("Warning: Best checkpoint not found, using current model state")
-
-                # Determine which snapshot we're testing on
-                # train_snapshots[phase_idx] uses time step (valid_start + phase_idx)
-                # We test on time step (valid_start + phase_idx + 1)
-                test_snapshot_idx = self.splitter.valid_start + phase_idx + 1
-
-                # Compute graph metrics using accumulated predictions from logger
-                # These predictions now come from the BEST epoch's TEST run
-                graph_metrics = self.logger.compute_and_log_phase_graph_metrics(
-                    num_nodes=self.num_nodes, phase_idx=phase_idx, snapshot_idx=test_snapshot_idx
-                )
-
-                # Add to phase results for checkpoint saving
-                phase_results["graph_metrics"] = graph_metrics
-
-                # Save graph files if metrics were computed successfully
-                if graph_metrics:
-                    self._save_phase_graphs(
-                        phase_idx=phase_idx,
-                        phase_desc=phase_desc,
-                        snapshot_idx=test_snapshot_idx,
-                        graph_metrics=graph_metrics,
-                    )
-                    print("Graph metrics and files saved successfully")
-                else:
-                    print("No graph metrics computed (no predictions accumulated)")
-
-            except Exception as e:
-                print(f"Warning: Could not compute or save graph metrics: {e}")
-                phase_results["graph_metrics"] = {}
-        else:
-            phase_results["graph_metrics"] = {}
+        print(f"  Best test {target_measure}: {best_eval_test:.4f} at epoch {best_epoch}")
 
         return phase_results
-
-    def _load_predictions_from_edg(self, filepath: str) -> None:
-        """Load predictions from a saved .edg file and populate logger buffers.
-
-        Args:
-            filepath: Path to the .edg file containing predictions.
-        """
-        # Read the file
-        edges_idx = []
-        edges_probs = []
-        edges_vals = []
-        edges_labels = []
-
-        with open(filepath) as f:
-            for line in f:
-                # Skip header and comments
-                if line.startswith("#"):
-                    continue
-
-                parts = line.strip().split("\t")
-                if len(parts) >= 4:
-                    src, dst, prob, label = parts[:4]
-                    edges_idx.append([int(src), int(dst)])
-                    edges_probs.append(float(prob))
-                    # Predicted value based on threshold
-                    edges_vals.append(1 if float(prob) > 0.5 else 0)
-                    edges_labels.append(int(label))
-
-        # Convert to tensors and populate logger buffers
-        if edges_idx:
-            # Clear existing buffers
-            self.logger.pred_edges_idx = []
-            self.logger.pred_edges_vals = []
-            self.logger.pred_edge_probs = []
-            self.logger.pred_edges_labels = []
-
-            # Convert to tensors - match the format expected by compute_and_log_phase_graph_metrics
-            edge_idx_tensor = torch.tensor(edges_idx, dtype=torch.long).t()  # [2, num_edges]
-            edge_probs_tensor = torch.tensor(edges_probs, dtype=torch.float32)
-            edge_vals_tensor = torch.tensor(edges_vals, dtype=torch.long)
-            edge_labels_tensor = torch.tensor(edges_labels, dtype=torch.long)
-
-            # Append as single batch (logger expects list of batches)
-            self.logger.pred_edges_idx.append(edge_idx_tensor)
-            self.logger.pred_edges_vals.append(edge_vals_tensor)
-            self.logger.pred_edge_probs.append(edge_probs_tensor)
-            self.logger.pred_edges_labels.append(edge_labels_tensor)
 
     def _save_phase_graphs(
         self, phase_idx: int, phase_desc: str, snapshot_idx: int, graph_metrics: dict
@@ -648,8 +558,7 @@ class Trainer:
         """
         # Create directory structure with clear train/test snapshot names
         # Using Path for cross-platform compatibility
-        # snapshot_idx already represents the correct time step for testing
-        train_snapshot_idx = snapshot_idx - 1  # Train snapshot is one step before test
+        train_snapshot_idx = phase_idx + 1
         graphs_dir = (
             Path("graphs") / f"train_snapshot_{train_snapshot_idx}_test_snapshot_{snapshot_idx}"
         )
@@ -726,6 +635,27 @@ class Trainer:
             gm.GraphMetricsCalculator.save_graph_graphml(
                 G, edge_prob_dict, node_community, str(graphml_path), phase_info
             )
+            print(f"    Saved GraphML: {graphml_path}")
+
+            # Save visualization of GCC (optional, can be disabled with --no-graph-viz)
+            # Visual representation with community colors
+            viz_path = graphs_dir / "gcc_visualization.png"
+            if not getattr(self.args, "no_graph_viz", False):
+                title = (
+                    f"Phase {phase_idx} - GCC (Snapshot {snapshot_idx})\n"
+                    f"{graph_metrics.get('num_communities', 0)} communities, "
+                    f"modularity={graph_metrics.get('modularity', 0):.3f}"
+                )
+                gm.GraphMetricsCalculator.visualize_gcc(G, node_community, str(viz_path), title)
+                print(f"    Saved visualization: {viz_path}")
+            else:
+                print("    ⏩ Skipped visualization (disabled with --no-graph-viz)")
+
+            print(f"\n  Graph files saved to: {graphs_dir}")
+            print(f"    - {edg_path.name} (edge list)")
+            print(f"    - {graphml_path.name} (XML with metadata)")
+            if not getattr(self.args, "no_graph_viz", False):
+                print(f"    - {viz_path.name} (GCC visualization)")
         else:
             print("  ⚠ No predictions accumulated, skipping graph file generation")
 
@@ -736,102 +666,188 @@ class Trainer:
             all_results: List of results from each phase.
         """
         print("\n" + "=" * 80)
-        print("SUMMARY")
+        print("SUMMARY OF ALL INCREMENTAL TRAINING PHASES")
         print("=" * 80)
 
         # Standard metrics summary
         for result in all_results:
+            phase_type = "Initial Training" if result["is_initial"] else "Fine-tuning"
             phase_desc = result.get("phase_desc", f"Phase {result['phase_idx']}")
-            print(f"\n{phase_desc}:")
+            print(f"\n{phase_desc} ({phase_type}):")
             print(f"  Best Test Metric: {result['best_test_metric']:.4f}")
             print(f"  Best Epoch: {result['best_epoch']}")
             print(f"  Total Epochs: {len(result['train_metrics'])}")
 
-        # NEW: Graph structure metrics summary table
-        # Display metrics across all phases for comparison
-        phases_with_graph_metrics = [r for r in all_results if r.get("graph_metrics")]
-
-        if phases_with_graph_metrics:
-            print(f"\n{'=' * 80}")
-            print("GRAPH STRUCTURE METRICS ACROSS PHASES")
-            print("=" * 80)
-            print("\nThese metrics characterize the predicted social network structure")
-            print("at the end of each training phase (computed on TEST snapshot):\n")
-
-            # Create table headers
-            headers = [
-                "Phase",
-                "Snapshot",
-                "Avg Degree",
-                "Avg Path",
-                "Modularity",
-                "Avg Cluster",
-                "Communities",
-                "GCC Ratio",
-            ]
-
-            # Build rows for each phase
-            rows = []
-            for result in phases_with_graph_metrics:
-                phase_idx = result["phase_idx"]
-                snapshot_idx = phase_idx + 1  # We test on snapshot i+1
-                gm = result["graph_metrics"]
-
-                # GCC ratio shows what fraction of nodes are in the main component
-                gcc_ratio = gm.get("gcc_size", 0) / gm.get("total_nodes", 1)
-
-                # Format values (handle None for shortest path and modularity)
-                avg_path = (
-                    f"{gm.get('average_shortest_path_length', 0):.2f}"
-                    if gm.get("average_shortest_path_length") is not None
-                    else "N/A"
-                )
-                modularity = (
-                    f"{gm.get('modularity', 0):.3f}" if gm.get("modularity") is not None else "N/A"
-                )
-
-                rows.append(
-                    [
-                        phase_idx,
-                        snapshot_idx,
-                        f"{gm.get('average_degree', 0):.2f}",
-                        avg_path,
-                        modularity,
-                        f"{gm.get('average_clustering', 0):.3f}",
-                        gm.get("num_communities", 0),
-                        f"{gcc_ratio:.1%}",
-                    ]
-                )
-
-            # Print simple ASCII table
-            col_widths = [
-                max(len(str(row[i])) for row in [headers] + rows) + 2 for i in range(len(headers))
-            ]
-
-            # Print header
-            header_line = " | ".join(h.center(col_widths[i]) for i, h in enumerate(headers))
-            print(header_line)
-            print("-" * len(header_line))
-
-            # Print rows
-            for row in rows:
-                row_line = " | ".join(
-                    str(cell).center(col_widths[i]) for i, cell in enumerate(row)
-                )
-                print(row_line)
-
-            # print(f"\nMetrics explanation:")
-            # print(f"  • Avg Degree: Average connections per node")
-            # print(f"  • Avg Path: Average shortest path length in GCC")
-            # print(f"  • Modularity: Community structure strength (0=random, >0.3=communities)")
-            # print(f"  • Avg Cluster: Local clustering coefficient (triadic closure)")
-            # print(f"  • Communities: Number of detected communities")
-            # print(f"  • GCC Ratio: Fraction of nodes in Giant Connected Component")
-
-            print("\nGraph files saved in: graphs/train_snapshot_{train}_test_snapshot_{test}/")
-            print("  Each directory contains: .edg (edge list), .graphml (XML)")
-        else:
-            print(f"\n{'=' * 80}")
-            print("No graph structure metrics available")
-
+        # Calculate average performance across all test phases
+        test_metrics = [r["best_test_metric"] for r in all_results]
+        print(f"\n{'=' * 80}")
+        print("Overall Test Performance:")
+        print(f"  Average: {np.mean(test_metrics):.4f}")
+        print(f"  Std Dev: {np.std(test_metrics):.4f}")
+        print(f"  Min: {np.min(test_metrics):.4f}")
+        print(f"  Max: {np.max(test_metrics):.4f}")
         print(f"{'=' * 80}\n")
+
+    def _save_final_predictions(self, all_results: list) -> None:
+        """Save final predictions from the best model of the last phase.
+
+        This method loads the best checkpoint from the last training phase,
+        runs inference on the final test snapshot, and saves all predictions
+        with their probabilities in .edg format (source target probability).
+
+        Args:
+            all_results: List of results from all phases.
+        """
+        if not all_results:
+            print("⚠ No results available, skipping final predictions save")
+            return
+
+        # Get the last phase
+        last_phase = all_results[-1]
+        phase_idx = last_phase["phase_idx"]
+
+        print(f"\n{'=' * 80}")
+        print("SAVING FINAL PREDICTIONS")
+        print("=" * 80)
+
+        # Load best checkpoint from last phase
+        log_dir = getattr(self.args, "log_dir", "log/")
+        checkpoint_path = os.path.join(log_dir, f"checkpoint_phase_{phase_idx}_best.pth.tar")
+
+        if not os.path.isfile(checkpoint_path):
+            print(f"⚠ Best checkpoint not found at {checkpoint_path}")
+            print("  Skipping final predictions save")
+            return
+
+        print(f"\n  Loading best checkpoint from phase {phase_idx}...")
+        self.load_checkpoint(checkpoint_path, load_optimizer_state=False)
+
+        # Get the test snapshot for the last phase
+        # train_snapshots[phase_idx] corresponds to time step (phase_idx + 1)
+        # We test on time step (phase_idx + 2)
+        test_snapshot_idx = phase_idx + 1
+        if test_snapshot_idx >= len(self.splitter.test_snapshots):
+            print(f"⚠ Test snapshot index {test_snapshot_idx} out of range")
+            return
+
+        test_snapshot = self.splitter.test_snapshots[test_snapshot_idx]
+
+        print("  Running inference on final test snapshot...")
+
+        # Set models to evaluation mode
+        self.gcn.eval()
+        self.classifier.eval()
+
+        # Run inference and collect all predictions
+        all_predictions = []
+        all_edge_indices = []
+        all_true_labels = []
+
+        with torch.no_grad():
+            for i, sample in enumerate(test_snapshot):
+                sample = self.prepare_sample(sample)
+
+                # Get predictions
+                predictions, _ = self.predict(
+                    sample.hist_adj_list,
+                    sample.hist_ndFeats_list,
+                    sample.label_sp["idx"],
+                    sample.node_mask_list,
+                )
+
+                # Get probabilities for positive class
+                probs = torch.softmax(predictions, dim=1)[:, 1]
+
+                # Get edge indices and true labels
+                edge_idx = sample.label_sp["idx"]  # Shape: [2, num_edges]
+                true_labels = sample.label_sp["vals"]  # Shape: [num_edges]
+
+                # Store results
+                all_predictions.append(probs.cpu())
+                all_edge_indices.append(edge_idx.cpu())
+                all_true_labels.append(true_labels.cpu())
+
+        # Concatenate all results
+        all_predictions = torch.cat(all_predictions, dim=0)
+        all_edge_indices = torch.cat(all_edge_indices, dim=1)  # [2, total_edges]
+        all_true_labels = torch.cat(all_true_labels, dim=0)
+
+        # Create output directory
+        predictions_dir = Path("predictions")
+        predictions_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save predictions in .edg format with 3 columns: source target probability
+        edg_path = predictions_dir / "final_predictions.edg"
+        with open(edg_path, "w") as f:
+            for i in range(all_edge_indices.shape[1]):
+                source = int(all_edge_indices[0, i])
+                target = int(all_edge_indices[1, i])
+                prob = float(all_predictions[i])
+                f.write(f"{source} {target} {prob:.6f}\n")
+
+        print(f"\n  ✓ Saved predictions to: {edg_path}")
+        print(f"    Total predictions: {all_edge_indices.shape[1]}")
+        print(f"    Positive edges: {all_true_labels.sum().item()}")
+        print(f"    Negative edges: {(all_true_labels == 0).sum().item()}")
+
+        # Build complete graph: historical edges + predicted positive edges
+        print("\n  Building complete graph with historical + predicted edges...")
+
+        # Get training snapshot for historical edges
+        train_snapshot_idx = phase_idx
+        train_snapshot = self.splitter.train_snapshots[train_snapshot_idx]
+
+        # Collect historical edges from training
+        historical_edges = set()
+        with torch.no_grad():
+            for sample in train_snapshot:
+                sample = self.prepare_sample(sample)
+                # Get predictions on training to identify historical structure
+                predictions_hist, _ = self.predict(
+                    sample.hist_adj_list,
+                    sample.hist_ndFeats_list,
+                    sample.label_sp["idx"],
+                    sample.node_mask_list,
+                )
+                edge_idx_hist = sample.label_sp["idx"]
+                true_labels_hist = sample.label_sp["vals"]
+
+                # Add edges that are truly positive (historical ground truth)
+                for i in range(edge_idx_hist.shape[1]):
+                    if true_labels_hist[i] == 1:
+                        source = int(edge_idx_hist[0, i])
+                        target = int(edge_idx_hist[1, i])
+                        historical_edges.add((source, target))
+
+        # Get predicted positive edges from test
+        predicted_edges = []
+        for i in range(all_edge_indices.shape[1]):
+            if all_predictions[i] >= 0.5:  # Predicted as positive
+                source = int(all_edge_indices[0, i])
+                target = int(all_edge_indices[1, i])
+                prob = float(all_predictions[i])
+                predicted_edges.append((source, target, prob))
+
+        # Combine: historical + predicted
+        complete_graph_edges = historical_edges.copy()
+        new_predicted_edges = []
+        for source, target, prob in predicted_edges:
+            if (source, target) not in complete_graph_edges:
+                complete_graph_edges.add((source, target))
+                new_predicted_edges.append((source, target, prob))
+
+        # Save complete graph
+        complete_edg_path = predictions_dir / "complete_graph_predicted.edg"
+        with open(complete_edg_path, "w") as f:
+            # Write historical edges (without probability, they're known)
+            for source, target in sorted(historical_edges):
+                f.write(f"{source} {target} 1.000000\n")
+            # Write predicted edges (with their probability)
+            for source, target, prob in sorted(new_predicted_edges):
+                f.write(f"{source} {target} {prob:.6f}\n")
+
+        print(f"  ✓ Saved complete graph to: {complete_edg_path}")
+        print(f"    Historical edges: {len(historical_edges)}")
+        print(f"    Predicted positive edges: {len(new_predicted_edges)}")
+        print(f"    Total edges in complete graph: {len(complete_graph_edges)}")
+        print(f"\n{'=' * 80}\n")

@@ -1,14 +1,14 @@
 """Logger for training and evaluation metrics.
 
 Provides comprehensive logging of training progress, evaluation metrics including
-precision, recall, F1-score, MAP, and AUC-ROC across different datasets and phases.
-Features: colored console output, timestamps, ASCII tables.
+precision, recall, F1-score, AUC, and MAP across different datasets and phases.
+Features: colored console output, timestamps, JSON metrics export, ASCII tables.
 """
 
 import datetime
+import json
 import logging
 import os
-from pathlib import Path
 import sys
 import time
 from types import SimpleNamespace
@@ -133,11 +133,14 @@ class Logger:
             num_classes: Number of classes for classification tasks.
             minibatch_log_interval: Interval (in batches) for logging during training.
         """
+        self.metrics_history = []  # Store metrics for JSON export
+
         if args is not None:
             currdate = str(datetime.datetime.today().strftime("%Y%m%d%H%M%S"))
             self.log_name = (
                 "log/log_" + args.data + "_" + args.model + "_" + currdate + "_r" + ".log"
             )
+            self.metrics_json_path = self.log_name.replace(".log", "_metrics.json")
 
             # Setup logging to BOTH stdout and file
             os.makedirs("log", exist_ok=True)
@@ -167,14 +170,22 @@ class Logger:
             root_logger.addHandler(stdout_handler)
             self.stdout_handler = stdout_handler
 
+            print(f"\n{'=' * 60}")
+            print(f"Log file: {self.log_name}")
+            print(f"Metrics JSON: {self.metrics_json_path}")
+            print(f"{'=' * 60}\n")
+
+            # logging.info("*** PARAMETERS ***")
+            # logging.info(pprint.pformat(args.__dict__))
+            # logging.info("")
         else:
             self.log_name = None
+            self.metrics_json_path = None
             print("Log: STDOUT only")
             logging.basicConfig(stream=sys.stdout, level=logging.INFO)
 
         self.num_classes = num_classes
         self.minibatch_log_interval = minibatch_log_interval
-        self.eval_k_list = [10, 100, 1000]
         self.args = args
         self.global_step = 0  # Global step counter for WandB
         self.phase_idx = 0
@@ -246,31 +257,16 @@ class Logger:
         self.losses = []
         self.errors = []
         self.MAPs = []
-        self.AUCs = []  # AUC-ROC on sampled negatives
-
-        # Track number of samples for MAP
-        self.MAP_sample_counts = []
+        self.AUCs = []
 
         self.conf_mat_tp = {}
         self.conf_mat_fn = {}
         self.conf_mat_fp = {}
-        self.conf_mat_tp_at_k = {}
-        self.conf_mat_fn_at_k = {}
-        self.conf_mat_fp_at_k = {}
-
-        for k in self.eval_k_list:
-            self.conf_mat_tp_at_k[k] = {}
-            self.conf_mat_fn_at_k[k] = {}
-            self.conf_mat_fp_at_k[k] = {}
 
         for cl in range(self.num_classes):
             self.conf_mat_tp[cl] = 0
             self.conf_mat_fn[cl] = 0
             self.conf_mat_fp[cl] = 0
-            for k in self.eval_k_list:
-                self.conf_mat_tp_at_k[k][cl] = 0
-                self.conf_mat_fn_at_k[k][cl] = 0
-                self.conf_mat_fp_at_k[k][cl] = 0
 
         if self.set.startswith("TEST"):
             self.conf_mat_tp_list = {}
@@ -298,7 +294,6 @@ class Logger:
             self.pred_edges_idx = []  # List of [2, batch_size] tensors
             self.pred_edges_vals = []  # List of [batch_size] tensors (binary predictions)
             self.pred_edge_probs = []  # List of [batch_size] tensors (probabilities)
-            self.pred_edges_labels = []  # List of [batch_size] tensors (ground truth labels)
 
     def log_minibatch(self, predictions, true_classes, loss, **kwargs):
         """Log metrics for a single minibatch.
@@ -306,47 +301,31 @@ class Logger:
         Args:
             predictions: Model predictions (logits or probabilities).
             true_classes: Ground truth labels.
-            loss: Loss value for the batch.
+            loss: Loss value for the batch (None for TEST set).
             **kwargs: Additional arguments (e.g., adj for link prediction).
         """
         probs = torch.softmax(predictions, dim=1)[:, 1]
 
         MAP = torch.tensor(self.get_MAP(probs, true_classes, do_softmax=False))
-        # MAP is calculated on all samples
-        self.last_map_num_samples = len(true_classes)
-
-        # Calculate AUC-ROC on the sampled edges (positive + negative)
-        # This is "sampling-based AUC" - measures discrimination on evaluated pairs only
-        AUC = torch.tensor(self.get_AUC_ROC(probs, true_classes, do_softmax=False))
+        AUC = torch.tensor(self.get_AUC(predictions, true_classes))
 
         error, conf_mat_per_class = self.eval_predicitions(
             predictions, true_classes, self.num_classes
         )
-        conf_mat_per_class_at_k = {}
-        for k in self.eval_k_list:
-            conf_mat_per_class_at_k[k] = self.eval_predicitions_at_k(
-                predictions, true_classes, self.num_classes, k
-            )
 
         batch_size = predictions.size(0)
         self.batch_sizes.append(batch_size)
 
-        self.losses.append(loss)
+        if loss is not None:
+            self.losses.append(loss)
         self.errors.append(error)
         self.MAPs.append(MAP)
         self.AUCs.append(AUC)
-
-        # Track sample counts for MAP
-        self.MAP_sample_counts.append(self.last_map_num_samples)
 
         for cl in range(self.num_classes):
             self.conf_mat_tp[cl] += conf_mat_per_class.true_positives[cl]
             self.conf_mat_fn[cl] += conf_mat_per_class.false_negatives[cl]
             self.conf_mat_fp[cl] += conf_mat_per_class.false_positives[cl]
-            for k in self.eval_k_list:
-                self.conf_mat_tp_at_k[k][cl] += conf_mat_per_class_at_k[k].true_positives[cl]
-                self.conf_mat_fn_at_k[k][cl] += conf_mat_per_class_at_k[k].false_negatives[cl]
-                self.conf_mat_fp_at_k[k][cl] += conf_mat_per_class_at_k[k].false_positives[cl]
             if self.set.startswith("TEST"):
                 self.conf_mat_tp_list[cl].append(conf_mat_per_class.true_positives[cl])
                 self.conf_mat_fn_list[cl].append(conf_mat_per_class.false_negatives[cl])
@@ -358,30 +337,36 @@ class Logger:
         if self.minibatch_done % self.minibatch_log_interval == 0:
             mb_error = self.calc_epoch_metric(self.batch_sizes, self.errors)
             mb_MAP = self.calc_epoch_metric(self.batch_sizes, self.MAPs)
-            partial_losses = torch.stack(self.losses)
-            mb_loss = partial_losses.mean().item()
+            mb_AUC = self.calc_epoch_metric(self.batch_sizes, self.AUCs)
+
+            log_parts = [
+                f"  📦 Batch {self.minibatch_done}/{self.num_minibatches} |",
+                f"Err: {mb_error:.4f} |",
+                f"MAP: {mb_MAP:.4f} |",
+                f"AUC: {mb_AUC:.4f}",
+            ]
+
+            if loss is not None:
+                partial_losses = torch.stack(self.losses)
+                mb_loss = partial_losses.mean().item()
+                log_parts.insert(1, f"Loss: {mb_loss:.4f} |")
 
             if self.verbose:
-                logging.info(
-                    f"  📦 Batch {self.minibatch_done}/{self.num_minibatches} | "
-                    f"Loss: {mb_loss:.4f} | "
-                    f"Err: {mb_error:.4f} | "
-                    f"MAP: {mb_MAP:.4f}"
-                )
+                logging.info(" | ".join(log_parts))
 
-            # Log minibatch metrics to WandB
+            # Log minibatch metrics to WandB (skip loss for TEST)
             if wandb.run:
                 try:
                     prefix = f"{self.set.lower()}/minibatch/"
-                    wandb.log(
-                        {
-                            f"{prefix}loss": mb_loss,
-                            f"{prefix}error": mb_error,
-                            f"{prefix}map": mb_MAP,
-                            f"{prefix}batch": self.minibatch_done,
-                        },
-                        step=self.global_step,
-                    )
+                    log_data = {
+                        f"{prefix}error": mb_error,
+                        f"{prefix}map": mb_MAP,
+                        f"{prefix}auc": mb_AUC,
+                        f"{prefix}batch": self.minibatch_done,
+                    }
+                    if loss is not None:
+                        log_data[f"{prefix}loss"] = mb_loss
+                    wandb.log(log_data, step=self.global_step)
                 except Exception as e:
                     logging.warning(f"Failed to log minibatch to WandB: {e}")
 
@@ -394,7 +379,6 @@ class Logger:
                 self.pred_edges_idx.append(kwargs["adj"].cpu())
                 self.pred_edges_vals.append(pred_binary.cpu())
                 self.pred_edge_probs.append(probs.cpu())
-                self.pred_edges_labels.append(true_classes.cpu())
 
         self.lasttime = time.monotonic()
 
@@ -405,16 +389,23 @@ class Logger:
             float: Primary evaluation metric for the epoch.
         """
         eval_measure = 0
+        epoch_time = time.monotonic() - self.ep_time
 
-        self.losses = torch.stack(self.losses)
-        mean_loss = float(self.losses.mean())
+        # Calculate mean_loss only if losses were accumulated (not on TEST)
+        if len(self.losses) > 0:
+            self.losses = torch.stack(self.losses)
+            mean_loss = float(self.losses.mean())
+        else:
+            mean_loss = None
 
         # Calculate all metrics
+        epoch_error = self.calc_epoch_metric(self.batch_sizes, self.errors)
         epoch_MAP = self.calc_epoch_metric(self.batch_sizes, self.MAPs)
         epoch_AUC = self.calc_epoch_metric(self.batch_sizes, self.AUCs)
 
-        # Calculate total number of samples used for MAP
-        total_map_samples = sum(self.MAP_sample_counts)
+        micro_precision, micro_recall, micro_f1 = self.calc_microavg_eval_measures(
+            self.conf_mat_tp, self.conf_mat_fn, self.conf_mat_fp
+        )
 
         # Calculate per-class metrics
         class_metrics = {}
@@ -424,7 +415,7 @@ class Logger:
             )
             class_metrics[cl] = {"precision": cl_precision, "recall": cl_recall, "f1": cl_f1}
 
-        # Calculate macro-averaged metrics
+        # Calculate macro-averaged metrics (needed for target_measure)
         macro_precision = sum(m["precision"] for m in class_metrics.values()) / self.num_classes
         macro_recall = sum(m["recall"] for m in class_metrics.values()) / self.num_classes
         macro_f1 = sum(m["f1"] for m in class_metrics.values()) / self.num_classes
@@ -433,30 +424,32 @@ class Logger:
         target = self.args.target_measure.lower()
 
         if target == "loss":
-            eval_measure = mean_loss
+            eval_measure = mean_loss if mean_loss is not None else 0
         elif target == "map":
             eval_measure = epoch_MAP
-        elif target in ["auc", "auc_roc"]:
+        elif target == "auc":
             eval_measure = epoch_AUC
         elif target in ["precision", "prec"]:
             if str(self.args.target_class) == "AVG":
-                eval_measure = macro_precision
+                eval_measure = micro_precision
             else:
                 eval_measure = class_metrics[int(self.args.target_class)]["precision"]
         elif target in ["recall", "rec"]:
             if str(self.args.target_class) == "AVG":
-                eval_measure = macro_recall
+                eval_measure = micro_recall
             else:
                 eval_measure = class_metrics[int(self.args.target_class)]["recall"]
         elif target == "f1":
             if str(self.args.target_class) == "AVG":
-                eval_measure = macro_f1
+                eval_measure = micro_f1
             else:
                 eval_measure = class_metrics[int(self.args.target_class)]["f1"]
+        elif target == "macro_f1":
+            eval_measure = macro_f1
         else:
             raise ValueError(
                 f"Unknown target_measure: '{self.args.target_measure}'. "
-                f"Must be one of: loss, map, precision/prec, recall/rec, f1"
+                f"Must be one of: loss, map, auc, precision/prec, recall/rec, f1, macro_f1"
             )
 
         # Use macro-averaged for overall metrics
@@ -464,13 +457,17 @@ class Logger:
 
         # ASCII Table Summary
         main_metrics = {
-            "Loss": f"{mean_loss:.4f}",
+            "Error": f"{epoch_error:.4f}",
             "Macro Prec": f"{precision:.4f}",
             "Macro Rec": f"{recall:.4f}",
             "Macro F1": f"{f1:.4f}",
             "MAP": f"{epoch_MAP:.4f}",
-            "AUC-ROC": f"{epoch_AUC:.4f}",
+            "AUC": f"{epoch_AUC:.4f}",
         }
+
+        # Add loss only for train/val, not for test
+        if mean_loss is not None:
+            main_metrics["Loss"] = f"{mean_loss:.4f}"
 
         table = format_metrics_table(self.set, self.epoch, main_metrics)
 
@@ -483,26 +480,6 @@ class Logger:
             # We need to mute StdoutHandler specifically.
             self.stdout_handler.setLevel(logging.WARNING)
             logging.info(f"\n{table}")
-            self.stdout_handler.setLevel(logging.INFO)
-
-        # Log sample counts for ranking metrics
-        total_classified_samples = sum(self.batch_sizes)
-
-        # Calculate total TP, FP, FN for class 1 (positive edges)
-        tp_class1 = self.conf_mat_tp[1]
-        fp_class1 = self.conf_mat_fp[1]
-        fn_class1 = self.conf_mat_fn[1]
-
-        sample_info = (
-            f"Total samples: {total_classified_samples:,} "
-            f"(Class 1: TP={tp_class1}, FP={fp_class1}, FN={fn_class1}) | "
-            f"MAP: {total_map_samples:,} edges"
-        )
-        if self.verbose:
-            logging.info(sample_info)
-        else:
-            self.stdout_handler.setLevel(logging.WARNING)
-            logging.info(sample_info)
             self.stdout_handler.setLevel(logging.INFO)
 
         # Per-class metrics table
@@ -519,7 +496,30 @@ class Logger:
             logging.info(f"\n{class_table}")
             self.stdout_handler.setLevel(logging.INFO)
 
-        # Log to WandB
+        # Save to JSON
+        epoch_metrics = {
+            "epoch": self.epoch,
+            "set": self.set,
+            "timestamp": datetime.datetime.now().isoformat(),
+            "loss": mean_loss,
+            "error": epoch_error,
+            "metrics": {
+                "macro_precision": precision,
+                "macro_recall": recall,
+                "macro_f1": f1,
+                "micro_precision": micro_precision,
+                "micro_recall": micro_recall,
+                "micro_f1": micro_f1,
+                "map": epoch_MAP,
+                "auc": epoch_AUC,
+            },
+            "class_metrics": class_metrics,
+            "time_seconds": epoch_time,
+        }
+        self.metrics_history.append(epoch_metrics)
+        self._save_metrics_json()
+
+        # Log to WandB (skip loss for TEST)
         if wandb.run:
             try:
                 # Base metrics with set prefix for organization
@@ -528,38 +528,33 @@ class Logger:
                 # Increment global step for epoch-level logging
                 self.global_step += 1
 
-                # Get current timestamp
-                timestamp = datetime.datetime.now().isoformat()
-
-                wandb.log(
-                    {
-                        f"{prefix}epoch": self.epoch,
-                        f"{prefix}loss": mean_loss,
-                        f"{prefix}macro_precision": precision,
-                        f"{prefix}macro_recall": recall,
-                        f"{prefix}macro_f1": f1,
-                        f"{prefix}map": epoch_MAP,
-                        f"{prefix}auc_roc": epoch_AUC,
-                        f"{prefix}timestamp": timestamp,
-                        f"{prefix}total_samples": total_classified_samples,
-                        f"{prefix}map_samples": total_map_samples,
-                        # Per-class metrics
-                        **{
-                            f"{prefix}class_{cl}_precision": m["precision"]
-                            for cl, m in class_metrics.items()
-                        },
-                        **{
-                            f"{prefix}class_{cl}_recall": m["recall"]
-                            for cl, m in class_metrics.items()
-                        },
-                        **{f"{prefix}class_{cl}_f1": m["f1"] for cl, m in class_metrics.items()},
-                        # Confusion matrix for class 1
-                        f"{prefix}tp_class1": tp_class1,
-                        f"{prefix}fp_class1": fp_class1,
-                        f"{prefix}fn_class1": fn_class1,
+                log_data = {
+                    f"{prefix}epoch": self.epoch,
+                    f"{prefix}error": epoch_error,
+                    f"{prefix}macro_precision": precision,
+                    f"{prefix}macro_recall": recall,
+                    f"{prefix}macro_f1": f1,
+                    f"{prefix}micro_precision": micro_precision,
+                    f"{prefix}micro_recall": micro_recall,
+                    f"{prefix}micro_f1": micro_f1,
+                    f"{prefix}map": epoch_MAP,
+                    f"{prefix}auc": epoch_AUC,
+                    f"{prefix}time_seconds": epoch_time,
+                    # Per-class metrics
+                    **{
+                        f"{prefix}class_{cl}_precision": m["precision"]
+                        for cl, m in class_metrics.items()
                     },
-                    step=self.global_step,
-                )
+                    **{
+                        f"{prefix}class_{cl}_recall": m["recall"]
+                        for cl, m in class_metrics.items()
+                    },
+                    **{f"{prefix}class_{cl}_f1": m["f1"] for cl, m in class_metrics.items()},
+                }
+                if mean_loss is not None:
+                    log_data[f"{prefix}loss"] = mean_loss
+
+                wandb.log(log_data, step=self.global_step)
             except Exception as e:
                 logging.warning(f"Failed to log to WandB: {e}")
 
@@ -594,7 +589,6 @@ class Logger:
             # Concatenate edge indices and values
             all_edge_idx = torch.cat(self.pred_edges_idx, dim=1)  # [2, total_edges]
             all_edge_vals = torch.cat(self.pred_edges_vals, dim=0)  # [total_edges]
-            torch.cat(self.pred_edge_probs, dim=0)  # [total_edges]
 
             # Compute metrics
             metrics = graph_metrics.GraphMetricsCalculator.compute_all_metrics(
@@ -607,10 +601,8 @@ class Logger:
             # Log to WandB
             if wandb.run:
                 try:
-                    # Use global_step to ensure monotonically increasing steps
-                    # phase_idx is included as a metric for tracking which phase this is
-                    self.global_step += 1
-                    timestamp = datetime.datetime.now().isoformat()
+                    # Use phase_idx as step to aggregate metrics across phases
+                    # This allows easy comparison of graph metrics across all phases
                     wandb.log(
                         {
                             "graph/avg_degree": metrics["average_degree"],
@@ -619,17 +611,24 @@ class Logger:
                             "graph/avg_clustering": metrics["average_clustering"],
                             "graph/num_communities": metrics["num_communities"],
                             "graph/gcc_ratio": metrics["gcc_ratio"],
-                            "graph/gcc_size": metrics["gcc_size"],
-                            "graph/total_nodes": metrics["total_nodes"],
                             "graph/phase": phase_idx,  # For tracking which phase this is
-                            "graph/snapshot": snapshot_idx,
-                            "graph/epoch": self.epoch,
-                            "graph/timestamp": timestamp,
                         },
-                        step=self.global_step,
+                        step=phase_idx,
                     )
                 except Exception as e:
                     logging.warning(f"Failed to log graph metrics to WandB: {e}")
+
+            # Save to history for JSON export
+            graph_epoch_metrics = {
+                "epoch": self.epoch,
+                "phase": phase_idx,
+                "snapshot": snapshot_idx,
+                "set": "GRAPH_METRICS",
+                "timestamp": datetime.datetime.now().isoformat(),
+                "metrics": metrics,
+            }
+            self.metrics_history.append(graph_epoch_metrics)
+            self._save_metrics_json()
 
             # Note: We do NOT clear the buffers here
             # The trainer needs them in _save_phase_graphs to save graph files
@@ -674,60 +673,14 @@ class Logger:
         )
         logging.info(f"\n{table}")
 
-    def _save_predictions_to_edg(self):
-        """Save TEST predictions to .edg file."""
-        # Check if we have accumulated predictions
-        if not hasattr(self, "pred_edges_idx") or len(self.pred_edges_idx) == 0:
-            logging.info("No TEST predictions to save")
-            return
-
-        try:
-            # Concatenate all predictions from batches
-            all_edge_idx = torch.cat(self.pred_edges_idx, dim=1)  # [2, total_edges]
-            all_edge_probs = torch.cat(self.pred_edge_probs, dim=0)  # [total_edges]
-            # all_edge_vals = torch.cat(self.pred_edges_vals, dim=0)  # [total_edges]
-            all_edge_labels = torch.cat(
-                self.pred_edges_labels, dim=0
-            )  # [total_edges] - ground truth
-
-            # Convert to numpy for easier handling
-            src_nodes = all_edge_idx[0].cpu().numpy()
-            dst_nodes = all_edge_idx[1].cpu().numpy()
-            probs = all_edge_probs.cpu().numpy()
-            labels = all_edge_labels.cpu().numpy()
-
-            # Create predictions directory if it doesn't exist
-            pred_dir = Path("log/predictions")
-            pred_dir.mkdir(parents=True, exist_ok=True)
-
-            # Generate filename with epoch and timestamp
-            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"predictions_{self.set.lower()}_epoch{self.epoch}_{timestamp}.edg"
-            filepath = pred_dir / filename
-
-            # Save all predictions (both positive and negative) with scores
-            with open(filepath, "w") as f:
-                f.write("# Source\tTarget\tProbability\tLabel\n")
-                for src, dst, prob, label in zip(src_nodes, dst_nodes, probs, labels):
-                    f.write(f"{src}\t{dst}\t{prob:.6f}\t{label}\n")
-
-            num_positive = (labels == 1).sum()
-            num_predicted_positive = (probs > 0.5).sum()
-            num_predicted_negative = (probs <= 0.5).sum()
-
-            logging.info(f"Saved predictions to {filepath}")
-            logging.info(
-                f"Total edges: {len(probs):,} | "
-                f"Positive labels: {num_positive:,} | "
-                f"Predicted positive: {num_predicted_positive:,} | "
-                f"Predicted negative: {num_predicted_negative:,}"
-            )
-
-            # Store filepath for potential reuse (e.g., loading best epoch predictions)
-            self.last_predictions_filepath = str(filepath)
-
-        except Exception as e:
-            logging.error(f"Failed to save predictions to .edg: {e}")
+    def _save_metrics_json(self):
+        """Save accumulated metrics to JSON file."""
+        if self.metrics_json_path:
+            try:
+                with open(self.metrics_json_path, "w", encoding="utf-8") as f:
+                    json.dump(self.metrics_history, f, indent=2, default=str)
+            except Exception as e:
+                logging.warning(f"Failed to save metrics JSON: {e}")
 
     def get_MAP(self, predictions, true_classes, do_softmax=False):
         """Calculate Mean Average Precision (MAP).
@@ -747,32 +700,22 @@ class Logger:
 
         return average_precision_score(true_classes_np, predictions_np)
 
-    def get_AUC_ROC(self, predictions, true_classes, do_softmax=False):
-        """Calculate AUC-ROC on sampled negatives.
-
-        This computes AUC-ROC on the evaluated sample set (positive edges + sampled negatives),
-        NOT on all possible node pairs. This is the standard "sampling-based AUC" approach
-        used in link prediction literature for computational efficiency.
-
-        The metric measures how well the model distinguishes between:
-        - Real new edges (positive samples)
-        - Randomly sampled non-existent edges (negative samples with 1:1 ratio)
-
-        Note: This is NOT the "global AUC" over all N*(N-1)/2 possible pairs,
-        which would be computationally prohibitive for large graphs.
+    def get_AUC(self, predictions, true_classes):
+        """Calculate Area Under the ROC Curve (AUC).
 
         Args:
-            predictions: Model predictions (probabilities for positive class).
-            true_classes: Ground truth labels (0=negative, 1=positive).
-            do_softmax: Whether to apply softmax to predictions.
+            predictions: Model predictions (logits).
+            true_classes: Ground truth labels.
 
         Returns:
-            float: AUC-ROC score on the sampled edge set.
+            float: AUC score.
         """
-        probs = torch.softmax(predictions, dim=1)[:, 1] if do_softmax else predictions
-
+        probs = torch.softmax(predictions, dim=1)[:, 1]
         predictions_np = probs.detach().cpu().numpy()
         true_classes_np = true_classes.detach().cpu().numpy()
+
+        if len(true_classes_np) == 0 or len(predictions_np) == 0:
+            return 0.0
 
         return roc_auc_score(true_classes_np, predictions_np)
 
@@ -811,50 +754,27 @@ class Logger:
             conf_mat_per_class.false_positives[cl] = fp
         return error, conf_mat_per_class
 
-    def eval_predicitions_at_k(self, predictions, true_classes, num_classes=2, k=10):
-        """Evaluate predictions at top-k.
+    def calc_microavg_eval_measures(self, tp, fn, fp):
+        """Calculate micro-averaged precision, recall, and F1-score.
 
         Args:
-            predictions: Model predictions (logits).
-            true_classes: Ground truth labels.
-            num_classes: Number of classes.
-            k: Top-k value.
+            tp: True positives per class.
+            fn: False negatives per class.
+            fp: False positives per class.
 
         Returns:
-            Confusion matrix per class for top-k predictions.
+            tuple: (precision, recall, F1-score)
         """
-        conf_mat_per_class = SimpleNamespace()
-        conf_mat_per_class.true_positives = {}
-        conf_mat_per_class.false_negatives = {}
-        conf_mat_per_class.false_positives = {}
+        tp_sum = sum(tp.values()).item()
+        fn_sum = sum(fn.values()).item()
+        fp_sum = sum(fp.values()).item()
 
-        if predictions.size(0) < k:
-            k = predictions.size(0)
+        p = 0 if tp_sum + fp_sum == 0 else tp_sum * 1.0 / (tp_sum + fp_sum)
 
-        for cl in range(num_classes):
-            # sort for prediction with higher score for target class (cl)
-            _, idx_preds_at_k = torch.topk(predictions[:, cl], k, dim=0, largest=True, sorted=True)
-            predictions_at_k = predictions[idx_preds_at_k]
-            predicted_classes = predictions_at_k.argmax(dim=1)
+        r = 0 if tp_sum + fn_sum == 0 else tp_sum * 1.0 / (tp_sum + fn_sum)
 
-            cl_indices_at_k = true_classes[idx_preds_at_k] == cl
-            cl_indices = true_classes == cl
-
-            pos = predicted_classes == cl
-            hits = (
-                predicted_classes[cl_indices_at_k] == true_classes[idx_preds_at_k][cl_indices_at_k]
-            )
-
-            tp = hits.sum()
-            fn = (
-                true_classes[cl_indices].size(0) - tp
-            )  # This only if we want to consider the size at K -> hits.size(0) - tp
-            fp = pos.sum() - tp
-
-            conf_mat_per_class.true_positives[cl] = tp
-            conf_mat_per_class.false_negatives[cl] = fn
-            conf_mat_per_class.false_positives[cl] = fp
-        return conf_mat_per_class
+        f1 = 2.0 * (p * r) / (p + r) if p + r > 0 else 0
+        return p, r, f1
 
     def calc_eval_measures_per_class(self, tp, fn, fp, class_id):
         """Calculate precision, recall, and F1-score for a specific class.
@@ -898,6 +818,8 @@ class Logger:
         Returns:
             float: Weighted average metric.
         """
+        if not metric_val or len(metric_val) == 0:
+            return 0.0
         batch_sizes = torch.tensor(batch_sizes, dtype=torch.float)
         epoch_metric_val = torch.stack(metric_val).cpu() * batch_sizes
         epoch_metric_val = epoch_metric_val.sum() / batch_sizes.sum()

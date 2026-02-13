@@ -35,6 +35,12 @@ if __name__ == "__main__":
         help="optional, yaml file containing parameters to be used, overrides command line parameters",
     )
     parser.add_argument(
+        "--no-graph-viz",
+        action="store_true",
+        default=False,
+        help="Disable graph visualization PNG generation (saves time on large graphs)",
+    )
+    parser.add_argument(
         "--no-graph-metrics",
         action="store_true",
         default=False,

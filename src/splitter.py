@@ -147,7 +147,7 @@ class IncrementalSplitter:
         """
         train_snapshots = []
         test_snapshots = []
-
+        print(self.snapshot_boundaries)
         for start, end in self.snapshot_boundaries:
             # Training version - uses normal negative sampling
             train_data = DataSplit(self.tasker, start, end, test=False)
