@@ -2,59 +2,75 @@
 
 \chapter{Conclusion}
 
-% This project addressed the challenge of temporal link prediction in social networks using evolving graph neural networks. The work was structured according to the CRISP-DM methodology, covering business understanding, data understanding, data preparation, modeling, and evaluation phases.
+This chapter summarizes the findings of the project, evaluates the achievement of the business and data mining goals, and outlines limitations and future work directions.
 
-% \section{Summary of Work}
+\section{Summary of Results}
 
-% The project developed an EvolveGCN-based system for predicting future connections in a temporal social network from the Gab platform. Key contributions include:
+This project developed a temporal link prediction system for social networks using EvolveGCN, following the CRISP-DM methodology. The work addressed the challenge of predicting future connections in dynamic social networks and generating synthetic network structures.
 
-% \begin{itemize}
-% 	\item \textbf{Data Analysis}: Comprehensive exploration of a 182,545-post dataset spanning nearly a decade (2016-2025), revealing exponential growth patterns, high English language homogeneity (97\%), and characteristic power-law distributions in user activity.
+\subsection*{Link Prediction Performance}
 
-% 	\item \textbf{Data Preparation}: Implementation of temporal feature construction respecting incremental learning requirements, with pre-computed BERT embeddings providing 768-dimensional semantic representations for each user.
+Two training pipelines were implemented and evaluated: the Original (sequence-based) and Incremental (phase-based) approaches. The key findings are:
 
-% 	\item \textbf{Model Implementation}: Development of two training pipelines for EvolveGCN-H: a standard cumulative approach and an incremental approach that adapts to temporal drift through phase-based training and walk-forward validation.
+\begin{itemize}
+	\item The \textbf{Original implementation} achieved superior ranking and classification performance, with MAP of 0.87 and Macro F1 of 0.86 on the best configuration (LR=0.001, NM=1).
+	\item The \textbf{Incremental implementation} achieved better discrimination ability with AUC of 0.80, suggesting its potential for threshold-independent ranking tasks.
+	\item Negative sampling multiplier significantly impacts model behavior: higher values (NM=2) improve AUC but reduce MAP, indicating a trade-off between decision boundary learning and ranking quality.
+\end{itemize}
 
-% 	\item \textbf{Structural Analysis}: Baseline comparison with established social networks (Facebook, Twitter, Google+), revealing Gab's lower clustering coefficient and modularity, suggesting weaker local community structure.
-% \end{itemize}
+\subsection*{Synthetic Network Generation}
 
-% \section{Expected Outcomes}
+The application to synthetic data revealed significant challenges:
 
-% Once experiments are completed, we anticipate the following outcomes:
+\begin{itemize}
+	\item The Original implementation fails to predict edges between synthetic users, attributing to the extreme dimensional collapse (PC1 explaining 95-100\% variance) that prevents the model from learning discriminative features for the homogeneous synthetic user cluster.
+	\item Only the Incremental approach with richer embedding space (PC1=76\%) attempts to connect synthetic users, though with poor structural fidelity.
+	\item The generated synthetic network exhibits unrealistic properties: average degree 7$\times$ higher than real networks, near-zero modularity indicating absence of community structure, and extremely low average path length due to over-dense connections.
+\end{itemize}
 
-% \begin{enumerate}
-% 	\item Quantitative comparison of incremental vs. standard training approaches on link prediction metrics (AUC-ROC, MAP, F1).
-% 	\item Analysis of how model performance varies across temporal snapshots as the network grows.
-% 	\item Evaluation of whether predicted networks maintain realistic structural properties.
-% 	\item Assessment of synthetic network generation quality for privacy-preserving applications.
-% \end{enumerate}
+\subsection*{Embedding Space Analysis}
 
-% \section{Future Work}
+The GCN embedding visualization provided critical insights into model behavior:
 
-% Several directions remain for future investigation:
+\begin{itemize}
+	\item \textbf{Oversmoothing}: The Original approach suffers from severe dimensional collapse, where node representations become nearly indistinguishable after multiple GCN layers.
+	\item \textbf{Real-Synthetic Separation}: The centroid distance between real and synthetic embeddings correlates with classification performance. Models with higher separation (6.29-6.65) achieve better MAP but fail to generalize to synthetic users.
+	\item \textbf{Synthetic Homogeneity}: Synthetic users exhibit 11.23$\times$ lower variance than real users, forming an isolated cluster that the model cannot meaningfully connect to the real network structure.
+\end{itemize}
 
-% \begin{itemize}
-% 	\item \textbf{Architecture Variants}: Testing the EvolveGCN-O variant which uses LSTM for weight evolution without node embeddings, potentially reducing computational overhead.
+\section{Achievement of Success Criteria}
 
-% 	\item \textbf{Feature Engineering}: Incorporating additional signals such as temporal activity patterns, engagement metrics, or graph-based structural features (centrality, community membership).
+The business success criteria defined in Section~\ref{sec:business_success} are evaluated as follows:
 
-% 	\item \textbf{Negative Sampling}: Exploring more sophisticated negative sampling strategies that account for temporal dynamics and network structure.
+\begin{enumerate}
+	\item \textbf{Development of a temporal link prediction model based on EvolveGCN}: \textcolor{drawgreen}{\textbf{Achieved}}. The EvolveGCN-H architecture was successfully implemented with both training pipelines.
 
-% 	\item \textbf{Transfer Learning}: Investigating whether models trained on Gab can transfer to other social networks or be fine-tuned for specific downstream tasks like risky user identification.
+	\item \textbf{Quantitative comparison using standard metrics}: \textcolor{drawgreen}{\textbf{Achieved}}. Comprehensive evaluation with MAP, AUC, Precision, Recall, and F1-score was conducted across multiple configurations.
 
-% 	\item \textbf{Deployment Considerations}: Addressing scalability for real-time prediction on large-scale streaming graph data.
-% \end{itemize}
+	\item \textbf{Synthetic network generation}: \textcolor{drawred}{\textbf{Failed}}. The model generates predictions on synthetic data, but the resulting networks lack structural realism due to embedding distribution mismatch and severe oversmoothing.
+\end{enumerate}
 
-% \section{Relation to Literature}
+\section{Limitations}
 
-% This work builds upon and extends several strands of research:
+Several limitations were identified during this project:
 
-% \begin{itemize}
-% 	\item The EvolveGCN framework \cite{parejaEvolveGCNEvolvingGraph2020} for dynamic graph learning, adapting it to the specific requirements of temporal social network prediction.
+\begin{itemize}
+	\item \textbf{Embedding Distribution Mismatch}: The synthetic BERT embeddings are too homogeneous (within-group cosine similarity of 0.988) compared to real users (0.872), preventing the model from learning meaningful connections for synthetic nodes.
 
-% 	\item Multi-perspective user classification approaches \cite{benedettiIMMENSEInductiveMultiperspective2025, pellicaniSAIRUSSpatiallyawareIdentification2023, corizzoHURIHybridUser2023} that combine content semantics with network structure, motivating our use of BERT embeddings alongside graph topology.
+	\item \textbf{Oversmoothing in GCN}: The dimensional collapse observed in the Original implementation limits the model's ability to capture fine-grained user differences, particularly problematic for the link prediction task.
 
-% 	\item Link prediction literature \cite{daudApplicationsLinkPrediction2020} and social network analysis \cite{tabassumSocialNetworkAnalysis2018, newmanNetworksIntroduction2018}, providing theoretical foundations for the structural metrics used in evaluation.
-% \end{itemize}
+	\item \textbf{Cumulative Edge Assumption}: The assumption that edges persist once created simplifies the task but does not reflect real-world unfollowing behavior, potentially limiting real-world applicability.
 
-% The incremental training methodology addresses the practical challenge highlighted by recent work \cite{benedettiMultiviewLearningIdentification2025} that user behavior and beliefs evolve over time, requiring models that can adapt to temporal dynamics rather than treating networks as static entities.
+\end{itemize}
+
+\section{Future Work}
+
+Based on the findings, several directions for future research are recommended:
+
+\begin{enumerate}
+	\item \textbf{Mitigating Oversmoothing}: Implement techniques such as jumping knowledge networks, APPNP-style propagation, or fewer GCN layers to preserve node-level discrimination.
+
+	\item \textbf{Synthetic Data Improvement}: Generate synthetic posts with more diverse prompts or apply embedding perturbation techniques to increase variance and reduce the isolation of synthetic users.
+
+	\item \textbf{Test other models}: Explore alternative temporal graph models that may better capture dynamic patterns without severe oversmoothing.
+\end{enumerate}
