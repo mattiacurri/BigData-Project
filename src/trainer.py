@@ -540,7 +540,6 @@ class Trainer:
         This method saves the predicted social network graph at the end of each
         training phase. It creates:
         - .edg file: Simple edge list in X Y format (X follows Y)
-        - .graphml file: Rich XML format with probabilities and communities
         - .png file: Visualization of the Giant Connected Component
 
         Args:
@@ -553,7 +552,6 @@ class Trainer:
             graphs/
             └── train_snapshot_{train}_test_snapshot_{test}/
                 ├── predicted_graph.edg          # Edge list X→Y
-                ├── predicted_graph.graphml      # XML with metadata
                 └── gcc_visualization.png        # GCC plot
         """
         # Create directory structure with clear train/test snapshot names
@@ -617,43 +615,8 @@ class Trainer:
             gm.GraphMetricsCalculator.save_graph_edg(G, str(edg_path))
             print(f"    Saved edge list: {edg_path}")
 
-            # Save .graphml with probabilities and communities
-            # Rich format for analysis in Gephi, Cytoscape, etc.
-            graphml_path = graphs_dir / "predicted_graph.graphml"
-            phase_info = {
-                "phase": phase_idx,
-                "phase_desc": phase_desc,
-                "snapshot": snapshot_idx,
-                "avg_degree": graph_metrics.get("average_degree", 0),
-                "modularity": graph_metrics.get("modularity", 0),
-                "num_communities": graph_metrics.get("num_communities", 0),
-                "avg_shortest_path": graph_metrics.get("average_shortest_path_length", 0),
-                "avg_clustering": graph_metrics.get("average_clustering", 0),
-                "gcc_size": graph_metrics.get("gcc_size", 0),
-                "total_nodes": graph_metrics.get("total_nodes", 0),
-            }
-            gm.GraphMetricsCalculator.save_graph_graphml(
-                G, edge_prob_dict, node_community, str(graphml_path), phase_info
-            )
-            print(f"    Saved GraphML: {graphml_path}")
-
-            # Save visualization of GCC (optional, can be disabled with --no-graph-viz)
-            # Visual representation with community colors
-            viz_path = graphs_dir / "gcc_visualization.png"
-            if not getattr(self.args, "no_graph_viz", False):
-                title = (
-                    f"Phase {phase_idx} - GCC (Snapshot {snapshot_idx})\n"
-                    f"{graph_metrics.get('num_communities', 0)} communities, "
-                    f"modularity={graph_metrics.get('modularity', 0):.3f}"
-                )
-                gm.GraphMetricsCalculator.visualize_gcc(G, node_community, str(viz_path), title)
-                print(f"    Saved visualization: {viz_path}")
-            else:
-                print("    ⏩ Skipped visualization (disabled with --no-graph-viz)")
-
             print(f"\n  Graph files saved to: {graphs_dir}")
             print(f"    - {edg_path.name} (edge list)")
-            print(f"    - {graphml_path.name} (XML with metadata)")
             if not getattr(self.args, "no_graph_viz", False):
                 print(f"    - {viz_path.name} (GCC visualization)")
         else:

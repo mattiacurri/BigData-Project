@@ -1,3 +1,60 @@
 \titleformat{\chapter}[hang]{\Huge\bfseries}{\selectfont \thechapter\hsp\textcolor{red}{\emoji{rocket}}\hsp}{0pt}{\Huge\bfseries}
 
 \chapter{Conclusion}
+
+% This project addressed the challenge of temporal link prediction in social networks using evolving graph neural networks. The work was structured according to the CRISP-DM methodology, covering business understanding, data understanding, data preparation, modeling, and evaluation phases.
+
+% \section{Summary of Work}
+
+% The project developed an EvolveGCN-based system for predicting future connections in a temporal social network from the Gab platform. Key contributions include:
+
+% \begin{itemize}
+% 	\item \textbf{Data Analysis}: Comprehensive exploration of a 182,545-post dataset spanning nearly a decade (2016-2025), revealing exponential growth patterns, high English language homogeneity (97\%), and characteristic power-law distributions in user activity.
+
+% 	\item \textbf{Data Preparation}: Implementation of temporal feature construction respecting incremental learning requirements, with pre-computed BERT embeddings providing 768-dimensional semantic representations for each user.
+
+% 	\item \textbf{Model Implementation}: Development of two training pipelines for EvolveGCN-H: a standard cumulative approach and an incremental approach that adapts to temporal drift through phase-based training and walk-forward validation.
+
+% 	\item \textbf{Structural Analysis}: Baseline comparison with established social networks (Facebook, Twitter, Google+), revealing Gab's lower clustering coefficient and modularity, suggesting weaker local community structure.
+% \end{itemize}
+
+% \section{Expected Outcomes}
+
+% Once experiments are completed, we anticipate the following outcomes:
+
+% \begin{enumerate}
+% 	\item Quantitative comparison of incremental vs. standard training approaches on link prediction metrics (AUC-ROC, MAP, F1).
+% 	\item Analysis of how model performance varies across temporal snapshots as the network grows.
+% 	\item Evaluation of whether predicted networks maintain realistic structural properties.
+% 	\item Assessment of synthetic network generation quality for privacy-preserving applications.
+% \end{enumerate}
+
+% \section{Future Work}
+
+% Several directions remain for future investigation:
+
+% \begin{itemize}
+% 	\item \textbf{Architecture Variants}: Testing the EvolveGCN-O variant which uses LSTM for weight evolution without node embeddings, potentially reducing computational overhead.
+
+% 	\item \textbf{Feature Engineering}: Incorporating additional signals such as temporal activity patterns, engagement metrics, or graph-based structural features (centrality, community membership).
+
+% 	\item \textbf{Negative Sampling}: Exploring more sophisticated negative sampling strategies that account for temporal dynamics and network structure.
+
+% 	\item \textbf{Transfer Learning}: Investigating whether models trained on Gab can transfer to other social networks or be fine-tuned for specific downstream tasks like risky user identification.
+
+% 	\item \textbf{Deployment Considerations}: Addressing scalability for real-time prediction on large-scale streaming graph data.
+% \end{itemize}
+
+% \section{Relation to Literature}
+
+% This work builds upon and extends several strands of research:
+
+% \begin{itemize}
+% 	\item The EvolveGCN framework \cite{parejaEvolveGCNEvolvingGraph2020} for dynamic graph learning, adapting it to the specific requirements of temporal social network prediction.
+
+% 	\item Multi-perspective user classification approaches \cite{benedettiIMMENSEInductiveMultiperspective2025, pellicaniSAIRUSSpatiallyawareIdentification2023, corizzoHURIHybridUser2023} that combine content semantics with network structure, motivating our use of BERT embeddings alongside graph topology.
+
+% 	\item Link prediction literature \cite{daudApplicationsLinkPrediction2020} and social network analysis \cite{tabassumSocialNetworkAnalysis2018, newmanNetworksIntroduction2018}, providing theoretical foundations for the structural metrics used in evaluation.
+% \end{itemize}
+
+% The incremental training methodology addresses the practical challenge highlighted by recent work \cite{benedettiMultiviewLearningIdentification2025} that user behavior and beliefs evolve over time, requiring models that can adapt to temporal dynamics rather than treating networks as static entities.

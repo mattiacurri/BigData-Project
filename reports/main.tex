@@ -34,12 +34,23 @@
 \usepackage{marginnote}
 \usepackage{titlesec}
 \usepackage{tabularx}
+\usepackage{multirow}
+\usepackage{rotating}
 \usepackage{fancyhdr}
 \usepackage{float}
 \usepackage{enumitem}
 \usepackage[colorlinks=true,linkcolor=black,anchorcolor=black,citecolor=black,filecolor=black,menucolor=black,runcolor=black,urlcolor=black,backref=page]{hyperref}
 \usepackage{emoji}
 % \setemojifont{Noto Color Emoji}
+
+\usepackage{siunitx}
+
+\sisetup{
+    group-separator={\,},
+    group-minimum-digits=4,
+    table-number-alignment=center,
+    table-format=6.4
+}
 
 % Titlesec configuration
 \titlespacing\section{0pt}{10pt plus 4pt minus 2pt}{10pt plus 4pt minus 2pt}
@@ -172,7 +183,7 @@ skipabove=1.2\baselineskip,
 \restoregeometry
 \pagestyle{empty}
 {
-\tableofcontents
+	\tableofcontents
 }
 %\newpage
 \mainmatter
@@ -182,8 +193,7 @@ skipabove=1.2\baselineskip,
 \input{datapreparation}
 \input{modeling}
 \input{evaluation}
-\input{deployment}
-\input{conclusion}
+% \input{conclusion}
 
 \pagestyle{fancy}
 

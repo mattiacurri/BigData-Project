@@ -5,22 +5,152 @@
 This chapter covers the data preparation phase of the CRISP-DM methodology.
 
 \section{Select Data}
-Select the relevant data for the analysis.
 
-% \subsection{Sampling}
-% Apply sampling techniques to create representative subsets.
+The data selection process focuses on preparing the temporal graph data for link prediction using EvolveGCN. The relevant data consists of two main components:
 
-% \subsection{Feature Selection}
-% Select the most relevant features for the analysis.
+\begin{itemize}
+	\item \textbf{Social Network Graphs}: The edge lists from each snapshot representing the directed follower relationships (X follows Y) between users.
+	\item \textbf{Post Content}: The textual content from posts used to derive node features through BERT embeddings.
+\end{itemize}
+
+For the incremental learning approach, we use the cumulative structure where each snapshot $S_i$ contains all edges from previous snapshots plus new edges added in that time period. The dataset is organized into six temporal snapshots: 2016-2021, 2022, 2023, 2024, Jan-Jul 2025, and Jul 2025.
+
+\subsection*{Feature Selection}
+
+Node features are derived from pre-computed BERT embeddings of user posts. For each user, the embedding is computed as the average of BERT embeddings across all their posts up to the current snapshot:
+
+\begin{equation}
+	\mathbf{h}_u^{(t)} = \frac{1}{|P_u^{(t)}|} \sum_{p \in P_u^{(t)}} \text{BERT}(\text{content}_p)
+\end{equation}
+
+where $P_u^{(t)}$ is the set of posts by user $u$ up to snapshot $t$. This yields a 768-dimensional feature vector per node, capturing the semantic content of each user's contributions.
 
 \section{Clean Data}
-Clean the data by handling missing values, outliers, and errors.
+
+\subsection*{Missing Values}
+
+The data quality analysis revealed minimal missing values:
+
+\begin{itemize}
+	\item The \texttt{language} attribute has 877 missing values (0.48\%) in the aggregated dataset
+	\item All other attributes are 100\% complete
+	\item No empty post content was found
+\end{itemize}
+
+Missing language values are attributed to automatic language detection failures on very short or mixed-language posts. For the link prediction task, this does not affect model performance since features are derived from BERT embeddings rather than language labels.
+
+\subsection*{Duplicate Handling}
+
+Content-level duplicates were identified across snapshots, with the duplicate rate increasing over time (from 1.79\% in 2016-2021 to 10.04\% in Jul 2025). Two types of content duplicates exist:
+
+\begin{itemize}
+	\item \textbf{Intra-user duplicates}: The same user posting identical content multiple times (reposts)
+	\item \textbf{Inter-user duplicates}: Different users sharing the same post content (shared posts, quotes, or viral content)
+\end{itemize}
+
+For inter-user duplicates, the BERT embeddings computed for the identical posts are necessarily identical, since the embedding function is deterministic and content-based. This creates a semantic link between users who share the same content, which may be beneficial for link prediction as it captures content-based similarity. For link prediction, these duplicates do not negatively impact the task since:
+
+\begin{enumerate}
+	\item The network structure is defined by edges, not post content
+	\item Post IDs remain unique even when content is duplicated
+	\item User embeddings aggregate all posts, so duplicate content reinforces rather than distorts the representation
+	\item Identical embeddings for shared content naturally capture content-based user similarity
+\end{enumerate}
 
 \section{Construct Data}
-Construct new features or transform existing ones.
+
+\subsection*{Node Feature Construction}
+
+Temporal node features are constructed respecting the incremental nature of the dataset. For snapshot $t$, the features for each node are computed using only posts that exist up to and including snapshot $t$:
+
+\begin{equation}
+	\mathbf{h}_u^{(t)} = \frac{1}{|P_u^{(t)}|} \sum_{p \in P_u^{(t)}} \text{BERT}(\text{content}_p)
+\end{equation}
+
+where $P_u^{(t)} = \{p : \text{snapshot}(p) \leq t\}$.
+
+This temporal feature construction ensures no data leakage: at training time for snapshot $t$, the model only has access to information that would have been available at that point in time.
+
+\subsection*{Graph Construction}
+
+The social network is represented as a directed graph $G_t = (V_t, E_t)$ at each snapshot $t$, where:
+
+\begin{itemize}
+	\item $V_t$ is the set of nodes (users) that appear in any edge up to snapshot $t$ (cumulative)
+	\item $E_t$ is the set of directed edges (follower relationships) present at snapshot $t$
+	\item Edges represent ``X follows Y'' relationships and are treated as unweighted
+\end{itemize}
+
+The cumulative assumption states that once an edge exists, it persists in all subsequent snapshots. 
+%This reflects the nature of follower relationships on social platforms.
+
+% \subsection{Node ID Remapping}
+
+% Original user IDs from the Gab platform are remapped to contiguous indices $[0, N-1]$ where $N$ is the total number of unique nodes across all snapshots. This remapping:
+
+% \begin{itemize}
+% 	\item Enables efficient sparse tensor operations
+% 	\item Reduces memory footprint by eliminating large, sparse ID spaces
+% 	\item Maintains a bidirectional mapping between original and remapped IDs for interpretability
+% \end{itemize}
 
 \section{Integrate Data}
-Integrate data from multiple sources.
+
+Data integration involves combining the edge lists with post-derived features:
+
+\begin{enumerate}
+	\item \textbf{Edge Loading}: All \texttt{.edg} files are loaded and annotated with their corresponding snapshot index
+	\item \textbf{Post-to-User Mapping}: A mapping from post ID to user ID enables attribution of posts to nodes
+	\item \textbf{Post-to-Snapshot Mapping}: A mapping from post ID to snapshot index enables temporal feature filtering
+\end{enumerate}
+
+The integration produces a unified dataset object containing:
+\begin{itemize}
+	\item Edge tensor with shape $[num\_edges, 3]$ (source, target, timestep)
+	\item Node count and per-snapshot node statistics
+	\item Feature dimension (768 for BERT)
+	\item ID mappings for interpretation
+\end{itemize}
 
 \section{Format Data}
-Format the data according to the requirements of the modeling tools.
+
+\subsection*{Adjacency Matrix Format}
+
+For the GCN operations, adjacency matrices are stored in sparse format:
+
+\begin{equation}
+	\hat{A}_t = \tilde{D}_t^{-\frac{1}{2}} \tilde{A}_t \tilde{D}_t^{-\frac{1}{2}}, \quad \tilde{A}_t = A_t + I
+\end{equation}
+
+where the normalization enables stable gradient flow through the graph convolution layers.
+
+The sparse representation uses:
+\begin{itemize}
+	\item \texttt{idx}: $[2, num\_edges]$ tensor of (source, target) pairs
+	\item \texttt{vals}: $[num\_edges]$ tensor of edge values (normalized)
+\end{itemize}
+
+The number of edges depends on the snapshot considered at the time of training or inference, following the cumulative structure.
+
+% \subsection{Active Node Compaction}
+
+% For incremental learning efficiency, each snapshot uses only the active nodes (those present up to that snapshot). This active node compaction:
+
+% \begin{itemize}
+% 	\item Reduces memory usage from $O(N_{total})$ to $O(N_{active})$
+% 	\item Remaps adjacency indices to compacted space $[0, N_{active}-1]$
+% 	\item Enables training on early snapshots with small node sets
+% \end{itemize}
+
+\subsection*{Training Sample Format}
+
+What the model will receive during training for snapshot $t$ is:
+
+\begin{itemize}
+	\item \textbf{Historical Adjacency List}: $[\hat{A}_{t-k}, \ldots, \hat{A}_{t-1}]$ for $k$ historical steps
+	\item \textbf{Historical Node Features}: $[H_{t-k}, \ldots, H_{t-1}]$ corresponding feature matrices
+	\item \textbf{Node Masks}: Binary masks indicating which nodes are active at each historical step
+	\item \textbf{Label Edges}: Pairs $(u, v)$ with labels $y \in \{0, 1\}$ for training/evaluation
+\end{itemize}
+
+% The negative sampling strategy generates non-existent edges proportional to the positive edges, with smart sampling preferring edges involving nodes that have historical activity.

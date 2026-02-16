@@ -6,7 +6,9 @@ It handles model construction, hyperparameter randomization, dataset loading, an
 
 # parser
 import argparse
+from pathlib import Path
 import random
+import shutil
 from types import SimpleNamespace
 
 import numpy as np
@@ -46,6 +48,35 @@ if __name__ == "__main__":
         default=False,
         help="Disable graph structure metrics computation (saves time and memory)",
     )
+
+    # Capture config file name before parsing (file object will be consumed)
+    parsed_args_temp = parser.parse_args()
+    config_file_path = None
+    if parsed_args_temp.config_file:
+        config_file_path = parsed_args_temp.config_file.name
+        parsed_args_temp.config_file.close()
+
+    # Reparse with file object to maintain original behavior
+    parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
+    parser.add_argument(
+        "--config_file",
+        default="experiments/parameters_example.yaml",
+        type=argparse.FileType(mode="r"),
+        help="optional, yaml file containing parameters to be used, overrides command line parameters",
+    )
+    parser.add_argument(
+        "--no-graph-viz",
+        action="store_true",
+        default=False,
+        help="Disable graph visualization PNG generation (saves time on large graphs)",
+    )
+    parser.add_argument(
+        "--no-graph-metrics",
+        action="store_true",
+        default=False,
+        help="Disable graph structure metrics computation (saves time and memory)",
+    )
+
     args = u.parse_args(parser)
 
     args.use_cuda = torch.cuda.is_available() and args.use_cuda
@@ -114,6 +145,17 @@ if __name__ == "__main__":
         comp_loss=loss,
         dataset=dataset,
     )
+
+    # Copy config file to log folder if specified
+    if config_file_path and hasattr(args, "run_folder_name") and args.run_folder_name:
+        log_folder = f"log/{args.run_folder_name}"
+        config_filename = Path(config_file_path).name
+        config_dest = Path(log_folder) / config_filename
+        try:
+            shutil.copy2(config_file_path, config_dest)
+            print(f"Configuration file copied to: {config_dest}")
+        except Exception as e:
+            print(f"Warning: Failed to copy config file: {e}")
 
     if args.incremental:
         trainer.train_incremental()

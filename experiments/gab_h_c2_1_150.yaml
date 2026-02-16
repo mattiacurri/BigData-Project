@@ -1,0 +1,63 @@
+data: gab  # Gab dataset for incremental training with COLD START
+
+# Folder name for saving all run information (logs, metrics, config, checkpoints)
+# If specified, all outputs will be saved to log/<run_folder_name>/
+run_folder_name: gab_h_c2_1_50
+
+gab_args:
+  folder: ./data/
+  feats_per_node: 768  # BERT embedding dimension
+
+use_cuda: True
+
+model: egcn_h
+
+class_weights: [0.5, 0.5]
+save_node_embeddings: True
+
+incremental: True
+train_on_last_snapshot: False  # Use last tested checkpoint (phase 4) as final model
+
+finetune_epochs: 50  # Number of epochs for fine-tuning phases
+num_epochs: 50 # Number of epochs for initial training
+steps_accum_gradients: 1
+learning_rate: 0.0005
+negative_mult_training: 1
+negative_mult_test: 1
+target_measure: map # macro_f1
+target_class: 1
+seed: 42
+
+adj_mat_time_window: None
+num_hist_steps: 1  # ADAPTIVE: Cold start for first snapshot (0), then uses history
+start_from_first_snapshot: true  # Enable training from snapshot 0 with adaptive cold start
+
+data_loading_params:
+  batch_size: 1
+  num_workers: 0
+  
+gcn_parameters:
+  layer_1_feats: 128 # 128
+  layer_2_feats: 64 # 64
+  k_top_grcu: 768 #50
+  num_layers: 2
+  lstm_l1_layers: 1
+  lstm_l1_feats: 128
+  lstm_l2_layers: 1
+  lstm_l2_feats: 128
+  cls_feats: 128
+
+comments:
+  - "ADAPTIVE COLD START configuration"
+  - "start_from_first_snapshot=true enables training from snapshot 0"
+  - "First phase uses adaptive cold start (empty graph when no history)"
+  - "Subsequent phases accumulate history from previous snapshots"
+  - "train_on_last_snapshot=false: final model is last tested checkpoint (phase 4)"
+  - "Training phases with num_hist_steps=1:"
+  - "  Phase 0: Empty graph (idx=0) → Train snapshot 0, test snapshot 1 (COLD START)"
+  - "  Phase 1: Graph[0] (idx=1) → Train snapshot 1, test snapshot 2"
+  - "  Phase 2: Graph[1] (idx=2) → Train snapshot 2, test snapshot 3"
+  - "  Phase 3: Graph[2] (idx=3) → Train snapshot 3, test snapshot 4"
+  - "  Phase 4: Graph[3] (idx=4) → Train snapshot 4, test snapshot 5 (FINAL MODEL)"
+  - "Use case: Incremental training with validated final model"
+  - "5 phases total, snapshots 0-4 for training, 1-5 for testing"

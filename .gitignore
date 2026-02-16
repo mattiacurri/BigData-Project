@@ -221,3 +221,6 @@ scripts/
 wandb/
 graphs/
 todo.md
+log_/
+*.bat
+gab_*/

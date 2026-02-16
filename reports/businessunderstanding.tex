@@ -1,6 +1,7 @@
 \titleformat{\chapter}[hang]{\Huge\bfseries}{\selectfont \thechapter\hsp\textcolor{red}{\emoji{moneybag}}\hsp}{0pt}{\Huge\bfseries}
 
 \chapter{Business Understanding}
+\label{cha:businessunderstanding}
 
 This chapter covers the business understanding phase of the CRISP-DM methodology.
 
@@ -22,21 +23,22 @@ Given the urgency of protecting society from exposure to discriminatory, hateful
 The primary business goal of this project is to develop an effective temporal link prediction system for social networks that can:
 
 \begin{itemize}
-    \item Predict future connections between users based on their historical interactions and content
-    \item Evaluate the effectiveness of incremental learning approaches for temporal network evolution
-    \item Given a dataset of users and relative posts, generate realistic synthetic social network structures
-    \item Provide insights into how network properties evolve over time
+	\item Predict future connections between users based on their historical interactions and content
+	\item Evaluate the effectiveness of incremental learning approaches for temporal network evolution
+	\item Given a dataset of users and relative posts, generate realistic synthetic social network structures
+	\item Provide insights into how network properties evolve over time
 \end{itemize}
 
 \subsection*{Business Success Criteria}
+\label{sec:business_success}
 The project will be considered successful if it achieves the following outcomes:
 
 \begin{itemize}
-    \item Development of a temporal link prediction model based on EvolveGCN
-    \item Quantitative comparison of model performance using standard metrics (Mean Average Precision, AUC, Precision, Recall, F1)
-    \item Successful transfer learning application: trained models can generate plausible network structures on synthetic datasets
-    \item Analysis of network evolution patterns and structural properties across temporal snapshots
-    \item Generation of a large synthetic network of 1000 artificial users with realistic connection patterns
+	\item Development of a temporal link prediction model based on EvolveGCN
+	\item Quantitative comparison of model performance using standard metrics (Mean Average Precision, AUC, Precision, Recall, F1)
+	\item Successful transfer learning application: trained models can generate plausible network structures on synthetic datasets
+	\item Analysis of network evolution patterns and structural properties across temporal snapshots
+	\item Generation of a large synthetic network of 1000 artificial users with realistic connection patterns
 \end{itemize}
 
 \section{Assess Situation}
@@ -48,9 +50,9 @@ The available data are being collected from the social network platform Gab\foot
 Current resources available for the project are the following machines:
 
 \begin{enumerate}
-    \item CPU: AMD Ryzen 7 7700, 8 cores, 16 threads; GPU: NVIDIA RTX 5060Ti, 16 GB VRAM; RAM: 48 GB
-    \item CPU: AMD Ryzen 7 7840HS, 8 cores, 16 threads; GPU: Integrated AMD Radeon 780M; RAM: 48 GB
-    \item CPU: Intel Core i7-10750H, 6 cores, 12 threads; GPU: NVIDIA GTX 1650 Mobile Max-Q, 4 GB VRAM; RAM: 16 GB
+	\item CPU: AMD Ryzen 7 7700, 8 cores, 16 threads; GPU: NVIDIA RTX 5060Ti, 16 GB VRAM; RAM: 48 GB
+	\item CPU: AMD Ryzen 7 7840HS, 8 cores, 16 threads; GPU: Integrated AMD Radeon 780M; RAM: 48 GB
+	\item CPU: Intel Core i7-10750H, 6 cores, 12 threads; GPU: NVIDIA GTX 1650 Mobile Max-Q, 4 GB VRAM; RAM: 16 GB
 \end{enumerate}
 
 \subsection*{Identify Constraints}
@@ -58,18 +60,18 @@ Current resources available for the project are the following machines:
 There are no significant constraints anticipated for this project. However, potential challenges include:
 
 \begin{itemize}
-    \item Data Quality: The collected data may contain noise, missing values, or inconsistencies that could affect model performance.
-    \item Computational Resources: Training complex models on large datasets may require significant computational power and time.
-    \item Ethical Considerations: Handling user data requires adherence to privacy regulations and ethical guidelines to ensure responsible use of information.
+	\item Data Quality: The collected data may contain noise, missing values, or inconsistencies that could affect model performance.
+	\item Computational Resources: Training complex models on large datasets may require significant computational power and time.
+	\item Ethical Considerations: Handling user data requires adherence to privacy regulations and ethical guidelines to ensure responsible use of information.
 \end{itemize}
 
 \subsection*{Assumptions}
 
 \begin{itemize}
-    \item The dataset from Gab is representative of broader social network dynamics and user behaviors.
-    \item A connection between users exists if they are connected in one snapshot
-    \item Graphs are undirected and unweighted
-    \item If a connection exists between two users in a snapshot, it will also exist in all subsequent snapshots
+	\item The dataset from Gab is representative of broader social network dynamics and user behaviors.
+	\item A connection between users exists if they are connected in one snapshot
+	\item The graph is directed and unweighted
+	\item If a connection exists between two users in a snapshot, it will also exist in all subsequent snapshots
 \end{itemize}
 
 
@@ -80,18 +82,19 @@ There are no significant constraints anticipated for this project. However, pote
 Here we translate the business goals into specific data mining objectives:
 
 \begin{itemize}
-    \item Develop a temporal link prediction model using EvolveGCN to forecast future user connections based on historical interaction data.
-    \item Evaluate the model's performance using metrics such as Mean Average Precision (MAP), Area Under the Curve (AUC), Precision, Recall, and F1-score.
-    \item Adapt and test the trained model for generating synthetic social network structures.
-    \item Analyze the temporal evolution of network properties, including degree distribution, clustering coefficient, and average path length.
+	\item Develop a temporal link prediction model using EvolveGCN to forecast future user connections based on historical interaction data.
+	\item Evaluate the model's performance using metrics such as Mean Average Precision (MAP), Area Under the Curve (AUC), Precision, Recall, and F1-score.
+	\item Adapt and test the trained model for generating synthetic social network structures.
+	\item Analyze the generated network properties, including degree distribution, clustering coefficient, and average path length.
 \end{itemize}
 
 \subsection*{Success Criteria}
+\label{sec:datamining_success}
 
 The success of the data mining efforts will be measured by:
 
 \begin{itemize}
-    \item Achieving high performance on link prediction tasks
-    \item Demonstrating the model's ability to generalize to synthetic datasets, producing realistic network structures.
-    \item Providing comprehensive insights into the temporal dynamics of the social network through detailed analysis of evolving network metrics.
+	\item Achieving high performance on link prediction tasks
+	\item Demonstrating the model's ability to generalize to synthetic datasets, producing realistic network structures.
+	\item Providing comprehensive insights about the generated network's structural properties.
 \end{itemize}

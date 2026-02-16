@@ -137,13 +137,28 @@ class Logger:
 
         if args is not None:
             currdate = str(datetime.datetime.today().strftime("%Y%m%d%H%M%S"))
-            self.log_name = (
-                "log/log_" + args.data + "_" + args.model + "_" + currdate + "_r" + ".log"
-            )
-            self.metrics_json_path = self.log_name.replace(".log", "_metrics.json")
 
-            # Setup logging to BOTH stdout and file
-            os.makedirs("log", exist_ok=True)
+            # Determine log folder path
+            if hasattr(args, "run_folder_name") and args.run_folder_name:
+                # Use specified run folder
+                run_folder = f"log/{args.run_folder_name}"
+                os.makedirs(run_folder, exist_ok=True)
+                self.log_folder = run_folder
+                self.log_name = f"{run_folder}/log_{args.data}_{args.model}_{currdate}_r.log"
+                # Set log_dir on args for use in trainer for checkpoints
+                args.log_dir = run_folder
+            else:
+                # Fallback to original behavior
+                os.makedirs("log", exist_ok=True)
+                self.log_folder = "log"
+                self.log_name = (
+                    "log/log_" + args.data + "_" + args.model + "_" + currdate + "_r" + ".log"
+                )
+                # Ensure log_dir is set even for default case
+                if not hasattr(args, "log_dir"):
+                    args.log_dir = "log"
+
+            self.metrics_json_path = self.log_name.replace(".log", "_metrics.json")
 
             # Get the root logger and clear any existing handlers
             root_logger = logging.getLogger()
@@ -394,7 +409,7 @@ class Logger:
         # Calculate mean_loss only if losses were accumulated (not on TEST)
         if len(self.losses) > 0:
             self.losses = torch.stack(self.losses)
-            mean_loss = float(self.losses.mean())
+            mean_loss = float(self.losses.mean().detach())
         else:
             mean_loss = None
 

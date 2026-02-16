@@ -15,12 +15,13 @@ For dynamic graph analysis, we selected \textbf{EvolveGCN} (Evolving Graph Convo
 Traditional graph neural network approaches for dynamic graphs typically resort to node embeddings and use recurrent neural networks to regulate these embeddings and learn temporal dynamics. However, this approach faces significant challenges in practical scenarios where:
 
 \begin{itemize}
-    \item New nodes emerge after training
-    \item Nodes frequently appear and disappear
-    \item Node sets at different time steps may completely differ
+	\item New nodes emerge after training
+	\item Nodes frequently appear and disappear
+	\item Node sets at different time steps may completely differ
 \end{itemize}
 
-EvolveGCN resolves these challenges by focusing on model adaptation rather than node embeddings. Instead of using RNNs to learn dynamics from node features extracted by GNNs, EvolveGCN uses RNNs to regulate the GCN model (network parameters) at every time step \cite{parejaEvolveGCNEvolvingGraph2020}. This approach effectively performs model adaptation without requiring nodes to be present throughout the entire time span, making it suitable for our social network analysis where users may join or leave the platform.
+EvolveGCN resolves these challenges by focusing on model adaptation rather than node embeddings. Instead of using RNNs to learn dynamics from node features extracted by GNNs, EvolveGCN uses RNNs to regulate the GCN model (network parameters) at every time step \cite{parejaEvolveGCNEvolvingGraph2020}. 
+%This approach effectively performs model adaptation without requiring nodes to be present throughout the entire time span, making it suitable for our social network analysis where users may join or leave the platform.
 
 \subsection*{Architecture Overview}
 
@@ -33,36 +34,38 @@ At each time step $t$, the input data consists of the pair $(A_t \in \mathbb{R}^
 A GCN consists of multiple layers of graph convolution, which is similar to a perceptron but additionally has a neighborhood aggregation step motivated by spectral convolution. At time $t$, the $l$-th layer takes the adjacency matrix $A_t$ and the node embedding matrix $H_t^{(l)}$ as input, and uses a weight matrix $W_t^{(l)}$ to update the node embedding matrix to $H_t^{(l+1)}$ as output:
 
 \begin{equation}
-H_t^{(l+1)} = \text{GCONV}(A_t, H_t^{(l)}, W_t^{(l)}) := \sigma(\hat{A}_t H_t^{(l)} W_t^{(l)})
+	H_t^{(l+1)} = \text{GCONV}(A_t, H_t^{(l)}, W_t^{(l)}) := \sigma(\hat{A}_t H_t^{(l)} W_t^{(l)})
 \end{equation}
 
 where $\hat{A}_t$ is a normalization of $A_t$ defined as:
 
 \begin{equation}
-\hat{A} = \tilde{D}^{-\frac{1}{2}} \tilde{A} \tilde{D}^{-\frac{1}{2}}, \quad \tilde{A} = A + I, \quad \tilde{D} = \text{diag}\left(\sum_j \tilde{A}_{ij}\right)
+	\hat{A} = \tilde{D}^{-\frac{1}{2}} \tilde{A} \tilde{D}^{-\frac{1}{2}}, \quad \tilde{A} = A + I, \quad \tilde{D} = \text{diag}\left(\sum_j \tilde{A}_{ij}\right)
 \end{equation}
 
-and $\sigma$ is the activation function (typically ReLU) for all but the output layer. The initial embedding matrix comes from the node features: $H_t^{(0)} = X_t$. For a GCN with $L$ layers, the output layer function $\sigma$ may be the identity (producing high-level node representations) or softmax (for node classification probabilities).
+and $\sigma$ is the activation function (typically ReLU) for all but the output layer. 
+%The initial embedding matrix comes from the node features: $H_t^{(0)} = X_t$.
+%For a GCN with $L$ layers, the output layer function $\sigma$ may be the identity (producing high-level node representations) or softmax (for node classification probabilities).
 
 \subsection*{Weight Evolution Mechanisms}
 
-At the heart of the proposed method is the update of the weight matrix $W_t^{(l)}$ at time $t$ based on current as well as historical information. This requirement can be naturally fulfilled by using a recurrent architecture, with two options.
+% At the heart of the proposed method is the update of the weight matrix $W_t^{(l)}$ at time $t$ based on current as well as historical information. This requirement can be naturally fulfilled by using a recurrent architecture, with two options.
 
-\paragraph{EvolveGCN-H (Hidden State Version):} The first option treats $W_t^{(l)}$ as the hidden state of the dynamical system. A Gated Recurrent Unit (GRU) is used to update the hidden state upon time-$t$ input to the system, where the input information is naturally the node embeddings $H_t^{(l)}$:
-
-\begin{equation}
-W_t^{(l)} = \text{GRU}(H_t^{(l)}, W_{t-1}^{(l)})
-\end{equation}
-
-The implementation requires two extensions from standard GRU: (a) extending inputs and hidden states from vectors to matrices (because the hidden state is now the GCN weight matrices), and (b) matching the column dimension of the input with that of the hidden state. This is achieved through a summarization function that condenses the node embedding matrix $H_t^{(l)}$ into a matrix with appropriate dimensions using a learned parameter vector to compute weights for the rows, selecting the top-$k$ weighted rows.
-
-\paragraph{EvolveGCN-O (Output Version):} The second option treats $W_t^{(l)}$ as the output of the dynamical system (which becomes the input at the subsequent time step). A Long Short-Term Memory (LSTM) cell models this input-output relationship, maintaining system information through a cell context that acts like the hidden state of a GRU:
+\paragraph{EvolveGCN-H (Hidden State Version).} The first option treats $W_t^{(l)}$ as the hidden state of the dynamical system. A Gated Recurrent Unit (GRU) is used to update the hidden state upon time-$t$ input to the system, where the input information is naturally the node embeddings $H_t^{(l)}$:
 
 \begin{equation}
-W_t^{(l)} = \text{LSTM}(W_{t-1}^{(l)})
+	W_t^{(l)} = \text{GRU}(H_t^{(l)}, W_{t-1}^{(l)})
 \end{equation}
 
-In this version, node embeddings are not used at all. Implementing the -O version requires only a straightforward extension of the standard LSTM from the vector version to the matrix version.
+The implementation requires to match the column dimension of the input with that of the hidden state. This is achieved through a \textbf{summarization function} that condenses the node embedding matrix $H_t^{(l)}$ into a matrix with appropriate dimensions using a learned parameter vector to compute weights for the rows, selecting the top-$k$ weighted rows.
+
+\paragraph{EvolveGCN-O (Output Version).} The second option treats $W_t^{(l)}$ as the output of the dynamical system (which becomes the input at the subsequent time step). A Long Short-Term Memory (LSTM) cell models this input-output relationship, maintaining system information through a cell context that acts like the hidden state of a GRU:
+
+\begin{equation}
+	W_t^{(l)} = \text{LSTM}(W_{t-1}^{(l)})
+\end{equation}
+
+In this version, node embeddings are not used at all.
 
 \subsection*{Evolving Graph Convolution Unit (EGCU)}
 
@@ -70,95 +73,221 @@ Combining the graph convolution unit GCONV and a recurrent architecture, we reac
 
 For EvolveGCN-H:
 \begin{align}
-W_t^{(l)} &= \text{GRU}(H_t^{(l)}, W_{t-1}^{(l)}) \\
-H_t^{(l+1)} &= \text{GCONV}(A_t, H_t^{(l)}, W_t^{(l)})
+	W_t^{(l)}   & = \text{GRU}(H_t^{(l)}, W_{t-1}^{(l)})    \\
+	H_t^{(l+1)} & = \text{GCONV}(A_t, H_t^{(l)}, W_t^{(l)})
 \end{align}
 
 For EvolveGCN-O:
 \begin{align}
-W_t^{(l)} &= \text{LSTM}(W_{t-1}^{(l)}) \\
-H_t^{(l+1)} &= \text{GCONV}(A_t, H_t^{(l)}, W_t^{(l)})
+	W_t^{(l)}   & = \text{LSTM}(W_{t-1}^{(l)})              \\
+	H_t^{(l+1)} & = \text{GCONV}(A_t, H_t^{(l)}, W_t^{(l)})
 \end{align}
 
-In the -H version, the GCN weights are treated as hidden states of the recurrent architecture; in the -O version, these weights are treated as input/outputs. Chaining the units bottom-up creates a GCN with multiple layers for one time step, and unrolling over time horizontally forms a lattice on which information ($H_t^{(l)}$ and $W_t^{(l)}$) flows.
+In the -H version, the GCN weights are treated as hidden states of the recurrent architecture; in the -O version, these weights are treated as input/outputs. Chaining the units bottom-up creates a GCN with multiple layers for one time step.
+%, and unrolling over time horizontally forms a lattice on which information ($H_t^{(l)}$ and $W_t^{(l)}$) flows.
+
+\subsection*{Chosen Configuration}
+\label{sec:chosen_config}
+
+We chose to use the EvolveGCN-H variant for our experiments, as it allows the GCN weights to be directly influenced by the node embeddings at each time step.
+
+\paragraph{GCN Architecture Details}
+
+The GCN component consists of two stacked Graph Recurrent Convolution Units (GRCUs), each implementing a single graph convolution layer with weight evolution. The architecture follows a progressive dimensionality reduction pattern:
+\begin{itemize}
+	\item \textbf{Layer 1}: Input dimension 768 (BERT embedding size) $\rightarrow$ Output dimension 128
+	\item \textbf{Layer 2}: Input dimension 128 $\rightarrow$ Output dimension 64
+\end{itemize}
+
+Each GRCU layer performs the following operations at each time step $t$:
+
+\begin{enumerate}
+	\item \textbf{Weight Evolution}: The GCN weight matrix $W_t^{(l)}$ is evolved using a matrix-based GRU cell that takes as input the previous weights and the current node embeddings:
+	      \begin{equation}
+		      W_t^{(l)} = \text{matGRU}(W_{t-1}^{(l)}, H_t^{(l)}, \text{mask})
+	      \end{equation}
+
+	\item \textbf{Top-K Selection}: A learnable scoring mechanism selects the $k$ most relevant node embeddings for weight evolution. The scorer computes attention weights as:
+	      \begin{equation}
+		      \text{scores} = \frac{H_t^{(l)} \cdot s}{\|s\|}, \quad s \in \mathbb{R}^{d \times 1}
+	      \end{equation}
+	      where $s$ is a learnable parameter vector. The top-$k$ nodes are selected and their embeddings are weighted using $\tanh(\text{scores})$.
+
+	\item \textbf{Graph Convolution}: The evolved weights are applied to perform neighborhood aggregation:
+	      \begin{equation}
+		      H_t^{(l+1)} = \sigma(\hat{A}_t \cdot H_t^{(l)} \cdot W_t^{(l)})
+	      \end{equation}
+	      where $\hat{A}_t$ is the normalized adjacency matrix and $\sigma$ is the ReLU activation function.
+\end{enumerate}
+
+The matrix GRU cell implements three gates (update, reset, and candidate) following the standard GRU formulation, but extended to operate on matrices rather than vectors. Each gate is defined as:
+\begin{equation}
+	g = \phi(W_g \cdot z_{\text{topk}} + U_g \cdot W_{\text{prev}} + b_g)
+\end{equation}
+where $\phi$ is either sigmoid (for update and reset gates) or tanh (for candidate gate), and $z_{\text{topk}}$ is the output of the Top-K selector.
+
+\paragraph{MLP Classifier}
+
+The node embeddings produced by the final GCN layer are fed into a two-layer Multi-Layer Perceptron (MLP), concatenating pairs of node embeddings to predict the existence of edges between them.
+
+The MLP architecture is:
+\begin{itemize}
+	\item \textbf{Input layer}: Dimension 128 (64 $\times$ 2 from concatenated node embeddings)
+	\item \textbf{Activation}: ReLU
+	\item \textbf{Output layer}: 2 logits (edge exists / edge does not exist)
+\end{itemize}
+
+The classifier outputs probability scores for edge existence, trained with binary cross-entropy loss using balanced class weights $[0.5, 0.5]$ to handle the imbalance between positive and negative edge samples:
+
+\begin{equation}
+	\mathcal{L} = -\frac{1}{N} \sum_{i=1}^N \left[ w_1 y_i \log(\hat{y}_i) + w_0 (1 - y_i) \log(1 - \hat{y}_i) \right]
+\end{equation}
+
+\subsection*{Experiment Design: Training Protocol}
+
+In this project, we implemented two distinct training pipelines using the H variant of the EvolveGCN architecture:
+
+\begin{itemize}
+	\item \textbf{Original Implementation}: Sequence-based training where all snapshots are processed in a single batch per epoch
+	\item \textbf{Incremental Implementation}: Phase-based training where each snapshot is processed in a dedicated training phase
+\end{itemize}
+
+\subsection*{Original Implementation}
+\label{sec:original}
+
+This pipeline follows the reference implementation of EvolveGCN.\\ Given $n$ training snapshots $\{S_0, S_1, \dots, S_{n-1}\}$:
+
+\begin{itemize}
+	\item \textbf{Batch Composition}: Each training batch contains all $n$ snapshots. The model processes the entire temporal sequence in a single forward pass.
+	\item \textbf{Temporal Processing}: At each step $t$ within the batch, the snapshot $S_t$ observes the history accumulated up to $S_{t-1}$. The EvolveGCN architecture internally manages weight evolution across time steps through its recurrent mechanism (GRU).
+	\item \textbf{Training Loop}: For $E$ epochs, the model repeatedly sees the same sequence of snapshots, learning to predict edges at each time step based on historical context.
+\end{itemize}
+
+% For example, with 4 training snapshots:
+% \begin{enumerate}
+% 	\item Epoch 1: Process $[S_0, S_1, S_2, S_3]$ as a single batch
+% 	\item Epoch 2: Process $[S_0, S_1, S_2, S_3]$ again
+% 	\item ... continue for $E$ epochs
+% \end{enumerate}
+
+The best final model, chosen according to the MAP metric on the last training snapshot, is used for inference on synthetic data.
+
+\subsection*{Incremental Implementation}
+\label{sec:incremental}
+
+Given $n$ training snapshots, the training is divided into $n$ distinct phases. Each phase $i$ is dedicated to a single snapshot $S_i$:
+
+\begin{itemize}
+	\item \textbf{Phase Isolation}: During Phase $i$, the model trains for $E$ epochs exclusively on snapshot $S_i$. The snapshot $S_i$ contains the graph accumulated up to time $i$, including all edges from previous snapshots.
+	\item \textbf{Weight Transfer}: At the end of Phase $i$, the best checkpoint is saved. Phase $i+1$ starts by loading these weights.
+	\item \textbf{Evaluation}: After training on $S_i$, the model is evaluated on $S_{i+1}$.
+\end{itemize}
+
+For example, with 4 training snapshots:
+\begin{enumerate}
+	\item \textbf{Phase 0}: Train for $E$ epochs on $S_0$
+	\item \textbf{Phase 1}: Load best weights from Phase 0, train for $E$ epochs on $S_1$
+	\item \textbf{Phase 2}: Load best weights from Phase 1, train for $E$ epochs on $S_2$
+	\item \textbf{Phase 3}: Load best weights from Phase 2, train for $E$ epochs on $S_3$
+\end{enumerate}
+
+This results in $4 \times E$ total epochs, with the model progressively adapting to each temporal snapshot. In our case, we have 5 training snapshot (= 5 phases).
+
+The final model checkpoint from Phase 4 is used for inference on synthetic data.
+
+\subsection*{Experimental Configurations}
+
+We designed four experimental configurations per pipeline to evaluate the impact of two key hyperparameters: \textbf{learning rate} and \textbf{negative sampling ratio}. In particular, we tested learning rates of 0.001 and 0.0005, and negative sampling multipliers of 1$\times$ and 2$\times$ (i.e., generating one or two negative samples per positive edge).
+
+For the \textbf{Original Implementation}, 50 epochs are used to train on the entire sequence of snapshots in a single batch per epoch. For the \textbf{Incremental Implementation}, 50 epochs are used per phase, accumulating to 250 total epochs across 5 phases. All four configurations share the same architecture described in Section~\ref{sec:chosen_config}.
+
+A more aggressive negative sampling strategy is not explored due to the significant dimension of the dataset and the computational cost of training.
+
 
 \section{Generate Test Design}
 
-\subsection{Metrics}
-\begin{itemize}
-    \item \textbf{Classical:} Precision, Recall, F1-Score, AUC-ROC, MAP.
-    \item \textbf{Graph-based:} Average Degree, Clustering Coefficient, Modularity, Community structure, GCC ratio.
-\end{itemize}
-
-We compute these metrics both on the final graph obtained from the snapshots and on the graph
-restricted to synthetic nodes (i.e., the graph used to complete the synthetic dataset).
-
-\subsection{Experiments}
-Planned experiments: degree-based features; embedding-based features; embedding features in a
-"live-update" setting (if feasible). Model variants: both the H and O versions, when possible.
-
-\subsection{Examples of network metrics}
-\paragraph{Facebook Social Circles}
-Average Degree: 43.6910; Average Shortest Path: 3.6925; Modularity: 0.8348.
-
-\paragraph{Twitter Social Circles}
-Average Degree: 21.75; Modularity: 0.8042; Average Shortest Path: 4.9058.\\
-Nodes: 81\,306; Edges: 1\,768\,149.
-
-\paragraph{Google+ Social Circles}
-Average Degree: 127.06; Modularity: 0.4742; Average Shortest Path: 3.3163.\\
-Nodes: 107\,614; Edges: 13\,673\,453.
-
-\subsection{Description of metrics}
-We analyze graphs using three fundamental metrics:
-\begin{itemize}
-    \item \textbf{Average Degree:} the mean number of connections per node. For undirected graphs
-    $$\text{AvgDeg} = \frac{2|E|}{|V|},$$
-    while for directed graphs we use $$\text{AvgDeg} = \frac{|E|}{|V|},$$
-    where $|E|$ and $|V|$ denote the number of edges and vertices, respectively.
-    \item \textbf{Average Shortest Path:} the average number of hops between all pairs of reachable nodes
-    within the largest connected component (LCC). For directed graphs we consider weakly connected components.
-    \item \textbf{Modularity:} a measure of community structure quality, typically ranging from -1 to 1.
-    High positive values (e.g., > 0.3) indicate strong community structure. We compute modularity using
-    the Louvain algorithm; for directed graphs we first convert to an undirected representation.
-\end{itemize}
-\section{Build Model}
-
-In this project, we explored two distinct training pipelines using the H variant of the EvolveGCN architecture.
-
-\subsection{Standard Implementation}
-
-The first methodology closely follows the reference implementation of EvolveGCN:
+As \textbf{classification metrics}, we will use:
 
 \begin{itemize}
-    \item \textbf{Data Splitting}: Employs a standard proportion-based split or Leave-One-Out Cross-Validation (LOOCV). The timeline is divided into fixed blocks: typically the first 70\% for training, 10\% for validation, and 20\% for testing.
-    \item \textbf{Sequence-based Training}: The model processes the entire training sequence in a single batch or over multiple epochs. It learns the "average" dynamics of the training set but remains static once the training phase is complete.
-    \item \textbf{Memory Management}: Uses a fixed global node index system. While simpler to implement, it can become inefficient for graphs with a large total number of nodes where only a small subset is active at any given time step.
-    \item \textbf{Initialization}: Adheres to \textit{Kaiming} initialization for weight matrices.
+	\item \textbf{MAP (Mean Average Precision):} Mean of per-query average precisions:
+	      $$\mathrm{MAP}=\frac{1}{Q}\sum_{q=1}^Q\mathrm{AP}(q),$$
+	      where
+	      $$\mathrm{AP}(q)=\frac{1}{m}\sum_{k=1}^m\mathrm{Precision}@k$$
+	      over relevant items.
+	\item \textbf{Macro Precision:} Unweighted mean of per-class precision:
+	      $$\frac{1}{C}\sum_{c=1}^C\frac{\mathrm{TP}_c}{\mathrm{TP}_c+\mathrm{FP}_c}.$$
+	\item \textbf{Macro Recall:} Unweighted mean of per-class recall:
+	      $$\frac{1}{C}\sum_{c=1}^C\frac{\mathrm{TP}_c}{\mathrm{TP}_c+\mathrm{FN}_c}.$$
+	\item \textbf{Macro F1:} Unweighted mean of per-class F1 scores:
+	      $$\frac{1}{C}\sum_{c=1}^C\frac{2\cdot\mathrm{Precision}_c\cdot\mathrm{Recall}_c}{\mathrm{Precision}_c+\mathrm{Recall}_c}.$$
+	\item \textbf{AUC-ROC:} Illustrates the performance of a binary classifier system as its discrimination threshold is varied. It is created by plotting the fraction of true positives out of the positives (TPR = true positive rate) vs. the fraction of false positives out of the negatives (FPR = false positive rate), at various threshold settings.
+	\item \textbf{Per-class metrics:} Precision, Recall and F1 reported individually for each class to inspect class-level behavior.
 \end{itemize}
 
-\subsection{Incremental Implementation}
+To \textbf{evaluate the graph structure}, we will use:
 
-The second methodology is an adapted version designed specifically for \textit{incremental learning} considering the cumulative assumption of our dataset. 
+\begin{itemize}
+	\item \textbf{Average Degree:} the mean number of connections per node. For undirected graphs
+	      $$\text{AvgDeg} = \frac{2|E|}{|V|},$$
+	      while for directed graphs we use $$\text{AvgDeg} = \frac{|E|}{|V|},$$
+	      where $|E|$ and $|V|$ denote the number of edges and vertices, respectively.
 
-\subsubsection{Training Strategy: Snapshot-by-Snapshot Adaptation}
+	\item \textbf{Average Clustering Coefficient:} measures the extent to which neighboring nodes tend to connect to each other, quantifying local network transitivity. The local clustering coefficient for node $i$ is
+	      $$C_i = \frac{2e_i}{k_i(k_i-1)},$$
+	      where $e_i$ is the number of edges between neighbors of node $i$ and $k_i$ is the degree of node $i$. The average clustering coefficient is the mean across all nodes:
+	      $$\text{AvgCC} = \frac{1}{|V|}\sum_{i \in V} C_i.$$
 
-Unlike the static approach, the incremental implementation uses a \textbf{Phase-based Training} workflow. The timeline is discretized into multiple temporal snapshots $\{S_0, S_1, \dots, S_n\}$. In each training phase $i$:
+	\item \textbf{Average Shortest Path:} estimates the typical distance between nodes, reflecting how far information must travel through the network. For each pair of nodes $(i,j)$, we compute the shortest path length $d(i,j)$ as the minimum number of edges required to reach from $i$ to $j$. The average is computed over all reachable pairs within the largest connected component (LCC):
+	      $$\text{AvgSP} = \frac{1}{|P|}\sum_{(i,j) \in P} d(i,j),$$
+	      where $P$ is the set of all reachable node pairs and $|P|$ is their count. Lower values indicate more efficient information dissemination. For directed graphs we compute shortest paths considering the weakly connected component. Networks with AvgSP $< 5$ are typically considered well-connected small-world networks.
+
+	\item \textbf{Modularity:} a measure of community structure quality, quantifying the strength of division into modules compared to random expectations. It typically ranges from $-1$ to $1$, with high positive values (e.g., $> 0.3$) indicating strong community structure. The modularity is computed as
+	      $$Q = \frac{1}{2m}\sum_{ij}\left(A_{ij} - \frac{k_i k_j}{2m}\right)\delta(c_i, c_j),$$
+	      where $m$ is the total number of edges, $k_i$ is the degree of node $i$, $A_{ij}$ is the adjacency matrix entry, and $\delta(c_i, c_j)$ equals 1 if nodes $i$ and $j$ are in the same community, 0 otherwise. For directed graphs we convert to undirected representation before the computation.
+\end{itemize}
+
+We will compare the final cumulative graph provided by the dataset with the synthetic graph generated by the models, along with other social network datasets \cite{leskovec2012learning}, specifically:
+
+\begin{itemize}
+	\item \textbf{Facebook Social Circles:}\footnotemark[1] A dataset of ego-networks from Facebook, containing 4039 nodes and 88234 edges.
+
+	\item \textbf{Twitter Social Circles:}\footnotemark[2] A dataset of ego-networks from Twitter, containing 81306 nodes and 1768149 edges.
+
+	\item \textbf{Google+ Social Circles:}\footnotemark[3] A dataset of ego-networks from Google+, containing 107614 nodes and 13673453 edges.
+\end{itemize}
+
+We want to analyze the structural properties of the generated graph on the synthetic dataset. The ideal result will be a network that resembles the real cumulative graph in terms of degree distribution, clustering coefficient, average path length, and modularity. The other datasets will give context on whether eventual different metrics are still valuable and encountered on other real social networks.
+
+To generate the synthetic network, the pipeline will be as follows:
+
 \begin{enumerate}
-    \item The model is initialized with the weights from the previous phase $i-1$.
-    \item It is fine-tuned or trained on the current snapshot $S_i$ (representing "today's" graph).
-    \item It is immediately evaluated on its ability to predict links in the subsequent snapshot $S_{i+1}$ (representing "tomorrow's" graph).
+	\item \textbf{Model Loading}: Load the trained EvolveGCN-H model from the final checkpoint (phase 4) of the incremental training pipeline. The model includes both the GCN component (with evolved weights) and the MLP classifier for edge prediction.
+
+	\item \textbf{Real Graph Construction}: Load the real Gab network up to the final snapshot, including:
+	      \begin{itemize}
+		      \item Adjacency matrix with all historical edges
+		      \item Node features (BERT embeddings) for all 25,569 real users
+	      \end{itemize}
+
+	\item \textbf{Synthetic Data Loading}: Load pre-computed BERT embeddings for synthetic users. Synthetic users are distributed across 3 batches (400, 400, and 200 users, totaling 1,000 synthetic users).
+
+	\item \textbf{Incremental Batch Processing}: For each batch of synthetic users:
+	      \begin{enumerate}
+		      \item \textit{User Embedding Computation}: Compute each synthetic user's embedding as the average of their post embeddings.
+		      \item \textit{Hybrid Graph Construction}: Build an adjacency matrix combining:
+		            \begin{itemize}
+			            \item Real edges from the Gab network
+			            \item Self-loops for all synthetic nodes (to ensure GCN can process isolated nodes)
+		            \end{itemize}
+		      \item \textit{Feature Matrix Assembly}: Concatenate real node features with cumulative synthetic user embeddings.
+		      \item \textit{GCN Embedding}: Compute node embeddings for all nodes (real + synthetic) using the trained GCN.
+		      \item \textit{Edge Prediction}: Predict probabilities for candidate edges in three categories:
+		            \begin{itemize}
+			            \item New synthetic $\rightarrow$ all nodes (real, old synthetic, new synthetic)
+			            \item Real $\rightarrow$ new synthetic
+			            \item Old synthetic $\rightarrow$ new synthetic
+		            \end{itemize}
+		      \item \textit{Thresholding}: Classify edges as positive if prediction probability $\geq 0.5$.
+	      \end{enumerate}
 \end{enumerate}
 
-So, instead of passing to the model all the training snapshot data at once, we train it incrementally on each snapshot, allowing it to adapt its weights on the single snapshot and then immediately test its performance on the next snapshot. This simulates a real-world scenario where the model must adapt to new data as it arrives, rather than relying on a static training set.
-
-\subsubsection{Walk-Forward (Rolling) Evaluation}
-
-To accurately measure performance in a dynamic environment, we implement \textbf{Walk-Forward Validation}. This mimics a real-world deployment scenario:
-\begin{itemize}
-    \item \textbf{Future Prediction}: For every snapshot $t$, the model's performance is reported based on its prediction accuracy for snapshot $t+1$.
-    \item \textbf{Evaluation Metrics}: We track traditional link prediction metrics (AUC-ROC, Mean Average Precision) alongside structural graph metrics (Modularity, GCC, Community Detection) for each predicted graph window.
-\end{itemize}
-
-
-\section{Assess Model}
