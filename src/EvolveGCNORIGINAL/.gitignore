@@ -1,0 +1,11 @@
+log/
+.venv/
+.ruff_cache/
+__pycache__/
+data/
+scripts/
+tsne/
+models_and_embeddings/
+datasets/
+wandb/
+synthetic_results/

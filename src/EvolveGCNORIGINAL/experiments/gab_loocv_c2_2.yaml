@@ -1,0 +1,65 @@
+data: gab
+
+gab_args:
+  folder: ./data/gabdataset
+
+use_wandb: True
+wandb_project: gab2
+wandb_entity: null
+wandb_run_name: gab_loocv_c2_2_50ep
+wandb_log_minibatch: False
+
+use_cuda: True
+use_logfile: True
+
+model: egcn_h
+task: link_pred
+
+class_weights: [0.5, 0.5]
+use_2_hot_node_feats: False
+use_1_hot_node_feats: False
+save_node_embeddings: True
+
+train_proportion: null
+dev_proportion: null
+
+split_mode: "loocv"
+loocv_valid_snapshot: 5
+loocv_test_snapshot: 5
+
+num_epochs: 50
+steps_accum_gradients: 1
+learning_rate: 0.0005
+learning_rate_min: 0.0005
+learning_rate_max: 0.1
+negative_mult_training: 2
+negative_mult_test: 2
+smart_neg_sampling: True
+seed: 42
+target_measure: MAP
+target_class: 1
+early_stop_patience: 50
+
+adj_mat_time_window: 1
+num_hist_steps: 1
+num_hist_steps_min: 3
+num_hist_steps_max: 10
+
+data_loading_params:
+  batch_size: 1
+  num_workers: 0
+
+gcn_parameters:
+  feats_per_node: 768
+  feats_per_node_min: 100
+  feats_per_node_max: 256
+  layer_1_feats: 128
+  layer_1_feats_min: 20
+  layer_1_feats_max: 200
+  layer_2_feats: 64
+  num_layers: 2
+  cls_feats: 128
+  cls_feats_min: 100
+  cls_feats_max: 800
+comments:
+  - comments

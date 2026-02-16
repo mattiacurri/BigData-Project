@@ -1,0 +1,28 @@
+[project]
+name = "evolvegcn"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib>=3.10.8",
+    "morethemes>=0.5.1",
+    "pandas>=2.3.3",
+    "pyfonts>=1.2.0",
+    "pypalettes>=0.2.1",
+    "pyyaml>=6.0.3",
+    "scikit-learn>=1.8.0",
+    "torch>=2.9.1",
+    "tqdm>=4.67.1",
+    "wandb>=0.18.0",
+]
+
+[tool.uv.sources]
+torch = [
+    { index = "pytorch-gpu" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-gpu"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
