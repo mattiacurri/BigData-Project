@@ -1,7 +1,7 @@
 data: gab
 
 gab_args:
-  folder: ./data/gabdataset
+  folder: src/EvolveGCNORIGINAL/data/gabdataset
 
 use_wandb: True
 wandb_project: gab2

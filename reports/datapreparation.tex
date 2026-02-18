@@ -48,7 +48,7 @@ Content-level duplicates were identified across snapshots, with the duplicate ra
 	\item \textbf{Inter-user duplicates}: Different users sharing the same post content (shared posts, quotes, or viral content)
 \end{itemize}
 
-For inter-user duplicates, the BERT embeddings computed for the identical posts are necessarily identical, since the embedding function is deterministic and content-based. This creates a semantic link between users who share the same content, which may be beneficial for link prediction as it captures content-based similarity. For link prediction, these duplicates do not negatively impact the task since:
+For inter-user duplicates, the BERT embeddings computed for the identical posts are necessarily identical, since the embedding function is deterministic and content-based. These duplicates do not negatively impact the task since:
 
 \begin{enumerate}
 	\item The network structure is defined by edges, not post content

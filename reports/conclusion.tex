@@ -6,15 +6,15 @@ This chapter summarizes the findings of the project, evaluates the achievement o
 
 \section{Summary of Results}
 
-This project developed a temporal link prediction system for social networks using EvolveGCN, following the CRISP-DM methodology. The work addressed the challenge of predicting future connections in dynamic social networks and generating synthetic network structures.
+This project developed a temporal link prediction system for social networks using EvolveGCN, in order to generate synthetic network structures starting from synthetic users.
 
 \subsection*{Link Prediction Performance}
 
-Two training pipelines were implemented and evaluated: the Original (sequence-based) and Incremental (phase-based) approaches. The key findings are:
+Two training pipelines were implemented and evaluated: the \textcolor{drawred}{\textbf{Original (sequence-based)}} and \textcolor{drawblue}{\textbf{Incremental (phase-based)}} approaches. The key findings are:
 
 \begin{itemize}
-	\item The \textbf{Original implementation} achieved superior ranking and classification performance, with MAP of 0.87 and Macro F1 of 0.86 on the best configuration (LR=0.001, NM=1).
-	\item The \textbf{Incremental implementation} achieved better discrimination ability with AUC of 0.80, suggesting its potential for threshold-independent ranking tasks.
+	\item The \textcolor{drawred}{\textbf{Original implementation}} achieved superior ranking and classification performance, with MAP of 0.87 and Macro F1 of 0.86 on the best configuration (LR=0.001, NM=1).
+	\item The \textcolor{drawblue}{\textbf{Incremental implementation}} achieved better discrimination ability with AUC of 0.80, suggesting its potential for threshold-independent ranking tasks.
 	\item Negative sampling multiplier significantly impacts model behavior: higher values (NM=2) improve AUC but reduce MAP, indicating a trade-off between decision boundary learning and ranking quality.
 \end{itemize}
 
@@ -23,20 +23,12 @@ Two training pipelines were implemented and evaluated: the Original (sequence-ba
 The application to synthetic data revealed significant challenges:
 
 \begin{itemize}
-	\item The Original implementation fails to predict edges between synthetic users, attributing to the extreme dimensional collapse (PC1 explaining 95-100\% variance) that prevents the model from learning discriminative features for the homogeneous synthetic user cluster.
-	\item Only the Incremental approach with richer embedding space (PC1=76\%) attempts to connect synthetic users, though with poor structural fidelity.
-	\item The generated synthetic network exhibits unrealistic properties: average degree 7$\times$ higher than real networks, near-zero modularity indicating absence of community structure, and extremely low average path length due to over-dense connections.
+	\item The \textcolor{drawred}{\textbf{Original implementation}} fails to predict edges between synthetic users, attributing to the extreme dimensional collapse (PC1 explaining 95-100\% variance) that prevents the model from learning discriminative features for the homogeneous synthetic user cluster.
+	\item Only the \textcolor{drawblue}{\textbf{Incremental approach}} with richer embedding space (PC1=76\%) attempts to connect synthetic users, though with poor results.
+	\item The generated synthetic network exhibits unrealistic properties: average degree higher than real networks, near-zero modularity indicating absence of community structure, and extremely low average path length due to over-dense connections.
 \end{itemize}
 
-\subsection*{Embedding Space Analysis}
-
-The GCN embedding visualization provided critical insights into model behavior:
-
-\begin{itemize}
-	\item \textbf{Oversmoothing}: The Original approach suffers from severe dimensional collapse, where node representations become nearly indistinguishable after multiple GCN layers.
-	\item \textbf{Real-Synthetic Separation}: The centroid distance between real and synthetic embeddings correlates with classification performance. Models with higher separation (6.29-6.65) achieve better MAP but fail to generalize to synthetic users.
-	\item \textbf{Synthetic Homogeneity}: Synthetic users exhibit 11.23$\times$ lower variance than real users, forming an isolated cluster that the model cannot meaningfully connect to the real network structure.
-\end{itemize}
+In general, while the model can learn to predict links within the real network, it fails to generalize to synthetic users due to embedding distribution mismatch: the synthetic BERT embeddings are too homogeneous (within-group cosine similarity of 0.988) compared to real users (0.872), leading to an isolated cluster in the embedding space that the model cannot meaningfully connect to the real network structure. When links between synthetic users are captured, it results in an unrealistic explosion of connections among synthetic users, further distorting the network structure.
 
 \section{Achievement of Success Criteria}
 
@@ -47,30 +39,17 @@ The business success criteria defined in Section~\ref{sec:business_success} are 
 
 	\item \textbf{Quantitative comparison using standard metrics}: \textcolor{drawgreen}{\textbf{Achieved}}. Comprehensive evaluation with MAP, AUC, Precision, Recall, and F1-score was conducted across multiple configurations.
 
-	\item \textbf{Synthetic network generation}: \textcolor{drawred}{\textbf{Failed}}. The model generates predictions on synthetic data, but the resulting networks lack structural realism due to embedding distribution mismatch and severe oversmoothing.
+	\item \textbf{Synthetic network generation}: \textcolor{drawred}{\textbf{Failed}}. The model generates predictions on synthetic data, but the resulting networks lack structural realism.
 \end{enumerate}
-
-\section{Limitations}
-
-Several limitations were identified during this project:
-
-\begin{itemize}
-	\item \textbf{Embedding Distribution Mismatch}: The synthetic BERT embeddings are too homogeneous (within-group cosine similarity of 0.988) compared to real users (0.872), preventing the model from learning meaningful connections for synthetic nodes.
-
-	\item \textbf{Oversmoothing in GCN}: The dimensional collapse observed in the Original implementation limits the model's ability to capture fine-grained user differences, particularly problematic for the link prediction task.
-
-	\item \textbf{Cumulative Edge Assumption}: The assumption that edges persist once created simplifies the task but does not reflect real-world unfollowing behavior, potentially limiting real-world applicability.
-
-\end{itemize}
 
 \section{Future Work}
 
 Based on the findings, several directions for future research are recommended:
 
 \begin{enumerate}
-	\item \textbf{Mitigating Oversmoothing}: Implement techniques such as jumping knowledge networks, APPNP-style propagation, or fewer GCN layers to preserve node-level discrimination.
-
 	\item \textbf{Synthetic Data Improvement}: Generate synthetic posts with more diverse prompts or apply embedding perturbation techniques to increase variance and reduce the isolation of synthetic users.
 
-	\item \textbf{Test other models}: Explore alternative temporal graph models that may better capture dynamic patterns without severe oversmoothing.
+	\item \textbf{Test other models}: Explore alternative temporal graph models that may better capture dynamic patterns.
+	
+	\item \textbf{Explore new metrics}: Investigate the usage of loss functions that account specifically for the task of synthetic user link prediction, to penalize embedding isolation or encourage diversity in synthetic user representations.
 \end{enumerate}

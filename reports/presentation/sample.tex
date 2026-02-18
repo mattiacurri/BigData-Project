@@ -14,6 +14,9 @@
 \usepackage{rotating}
 \usepackage{emoji}
 
+\definecolor{drawblue}{HTML}{6C8EBF}
+\definecolor{drawred}{HTML}{B85450}
+
 \graphicspath{{../figures/}}
 
 %----------------------------------------------------------------------------------------
@@ -50,34 +53,37 @@
 \section{Business Understanding}
 %------------------------------------------------
 
-\begin{frame}{Problem Statement}
+\begin{frame}{Problem Statement \emoji{dart}}
 	\begin{columns}[c]
 		\column{0.55\textwidth}
 		\begin{itemize}
-			\item Social networks: critical for understanding modern online communities
+			\item Social networks critical for understanding modern online communities
 			\item Risky users exploit platforms for malicious activities
-			\item \textbf{Goal}: Temporal link prediction for social network analysis
+			\item Temporal dimension crucial for capturing evolving patterns%, typical of human communities
+			\item Labeled data scarcity hinders supervised learning approaches
+			\item \textbf{Goal}: Temporal link prediction for social network analysis on synthetic data
 		\end{itemize}
 
 		\column{0.45\textwidth}
 		\begin{block}{Objectives}
 			\begin{enumerate}
-				\item Predict future user connections
-				\item Evaluate incremental learning
-				\item Generate synthetic networks
+				\item Development of a temporal link prediction model
+				\item Quantitative comparison of model performance
+				\item Analysis of network evolution patterns and structural properties
+				\item Application of the trained model to generate synthetic network links
 			\end{enumerate}
 		\end{block}
 	\end{columns}
 \end{frame}
 
-\begin{frame}{Dataset: Gab Social Network}
+\begin{frame}{Dataset: Gab Social Network \emoji{bar-chart}}
 	\begin{columns}[c]
 		\column{0.5\textwidth}
 		\begin{itemize}
-			\item Platform: Gab (2016--2025)
+			\item Platform: Gab (2016-2025)
 			\item 6 temporal snapshots
 			\item Posts + social network graphs
-			\item BERT embeddings provided
+			\item 768-dimensional BERT embeddings for every post
 		\end{itemize}
 
 		\column{0.5\textwidth}
@@ -90,14 +96,14 @@
 				Total Posts       & 182,545        \\
 				Unique Users      & 27,002         \\
 				Snapshots         & 6              \\
-				Time Span         & 2016--2025     \\
+				Time Span         & 2016-2025      \\
 				\bottomrule
 			\end{tabular}
 		\end{table}
 	\end{columns}
 \end{frame}
 
-\begin{frame}{Synthetic Dataset}
+\begin{frame}{Synthetic Dataset \emoji{robot}}
 	\begin{columns}[c]
 		\column{0.5\textwidth}
 		\begin{block}{Synthetic Users}
@@ -105,7 +111,7 @@
 				\item 3 batches: 400 + 400 + 200
 				\item Total: 1,000 synthetic users
 				\item 9,990 synthetic posts
-				\item Pre-computed BERT embeddings
+				\item 768-dimensional BERT embeddings for every post
 			\end{itemize}
 		\end{block}
 
@@ -122,14 +128,14 @@
 	\vspace{0.5em}
 	\centering
 	\footnotesize
-	\textit{Pipeline: Real graph + synthetic embeddings $\rightarrow$ trained model $\rightarrow$ predicted edges}
+	% \textit{Pipeline: Real graph + real embeddings $\rightarrow$ trained model $\rightarrow$ Adding synthetic users + synthetic embeddings $\rightarrow$ predicted links $\rightarrow$ synthetic graph}
 \end{frame}
 
 %------------------------------------------------
 \section{Data Understanding}
 %------------------------------------------------
 
-\begin{frame}{Data Quality: Missing Values}
+\begin{frame}{Data Quality \emoji{mag}}
 	\begin{columns}[c]
 		\column{0.55\textwidth}
 		\begin{table}
@@ -145,9 +151,10 @@
 		\end{table}
 
 		\begin{itemize}
-			\item 99.52\% overall completeness
-			\item No empty content posts
-			\item 100\% snapshot consistency
+			\item Posts lacking textual content were removed.
+			\item Posts containing images or videos were removed.
+			\item Posts written in languages other than English were removed.
+			\item HTML tags were stripped from the remaining content.
 		\end{itemize}
 
 		\column{0.45\textwidth}
@@ -170,7 +177,7 @@
 	\end{columns}
 \end{frame}
 
-\begin{frame}{Duplicate Content Analysis}
+\begin{frame}{Duplicate Content Analysis \emoji{mag}}
 	\begin{columns}[c]
 		\column{0.5\textwidth}
 		\begin{table}
@@ -194,26 +201,17 @@
 			\item Increasing duplicate rate over time
 			\item No duplicate post IDs
 			\item Each post has unique metadata
+			\item Reblogs as standalone posts
 		\end{itemize}
 	\end{columns}
 \end{frame}
 
-\begin{frame}{BERT Embeddings: Real vs Synthetic}
+\begin{frame}{BERT Embeddings: Real vs Synthetic \emoji{chart-increasing}}
 	\centering
-	\includegraphics[width=0.9\textwidth]{embedding_comparison.png}
+	\includegraphics[width=\textwidth]{embedding_comparison.png}
 \end{frame}
 
-\begin{frame}{Embedding Space Visualization}
-	\centering
-	\includegraphics[width=0.95\textwidth]{embeddings_visualization_bert.png}
-\end{frame}
-
-\begin{frame}{User-Level Embedding Analysis}
-	\centering
-	\includegraphics[width=0.95\textwidth]{user_embeddings_visualization.png}
-\end{frame}
-
-\begin{frame}{Embedding Statistics}
+\begin{frame}{Embedding Statistics \emoji{abacus}}
 	\begin{columns}[c]
 		\column{0.5\textwidth}
 		\begin{table}
@@ -238,11 +236,22 @@
 	\end{columns}
 \end{frame}
 
+\begin{frame}{Embedding Space Visualization \emoji{world-map}}
+	\centering
+	\includegraphics[width=\textwidth]{embeddings_visualization_bert.png}
+\end{frame}
+
+\begin{frame}{User-Level Embedding Analysis \emoji{busts-in-silhouette}}
+	\centering
+	\includegraphics[width=\textwidth]{user_embeddings_visualization.png}
+\end{frame}
+
+
 %------------------------------------------------
 \section{Data Preparation}
 %------------------------------------------------
 
-\begin{frame}{Feature Construction}
+\begin{frame}{Feature Construction \emoji{brick}}
 	\begin{columns}[c]
 		\column{0.5\textwidth}
 		Node features from BERT embeddings:
@@ -250,16 +259,11 @@
 			\mathbf{h}_u^{(t)} = \frac{1}{|P_u^{(t)}|} \sum_{p \in P_u^{(t)}} \text{BERT}(\text{content}_p)
 		\]
 
-		\begin{itemize}
-			\item 768-dimensional feature vectors
-			\item Temporal feature construction
-			\item No data leakage
-		\end{itemize}
 
 		\column{0.5\textwidth}
 		\begin{block}{Graph Structure}
 			\begin{itemize}
-				\item Directed graph $G_t = (V_t, E_t)$
+				\item \textbf{Directed}, \textbf{unweighted} graph $G_t = (V_t, E_t)$
 				\item Cumulative edge assumption
 				\item Sparse adjacency representation
 			\end{itemize}
@@ -267,12 +271,73 @@
 	\end{columns}
 \end{frame}
 
-\begin{frame}{Adjacency Matrix Normalization}
-	\[
-		\hat{A}_t = \tilde{D}_t^{-\frac{1}{2}} \tilde{A}_t \tilde{D}_t^{-\frac{1}{2}}, \quad \tilde{A}_t = A_t + I
-	\]
 
-	\vspace{1em}
+%------------------------------------------------
+\section{Modeling}
+%------------------------------------------------
+
+\begin{frame}{EvolveGCN Architecture \emoji{gear}}
+	\begin{columns}[c]
+		\column{0.5\textwidth}
+		\textbf{Graph Convolution:}
+		\[
+			H_t^{(l+1)} = \sigma(\hat{A}_t H_t^{(l)} W_t^{(l)})
+		\]
+
+		\textbf{Weight Evolution (EvolveGCN-H):}
+		\[
+			W_t^{(l)} = \text{GRU}(H_t^{(l)}, W_{t-1}^{(l)})
+		\]
+		\begin{itemize}
+			\item Handles new nodes at test time
+			\item No requirement for static node sets
+		\end{itemize}
+
+
+		\column{0.45\textwidth}
+		\begin{block}{Key Innovation}
+			RNN evolves GCN parameters instead of node embeddings
+		\end{block}
+		\begin{alertblock}{Top-$K$ Selection}
+			\[
+				\text{scores} = \frac{H_t^{(l)} \cdot s}{\|s\|}
+			\]
+			Select most relevant embeddings for weight evolution
+		\end{alertblock}
+	\end{columns}
+\end{frame}
+
+\begin{frame}{GCN Architecture Details \emoji{gear}}
+	\textbf{GRCU Layers:}
+	\begin{itemize}
+		\item Layer 1: 768 $\rightarrow$ 128
+		\item Layer 2: 128 $\rightarrow$ 64
+	\end{itemize}
+
+	\vspace{0.5em}
+
+	\textbf{MLP Classifier:}
+	\begin{itemize}
+		\item Input: 128 (64 $\times$ 2 concatenated)
+		\item Output: 2 logits
+	\end{itemize}
+
+	\vspace{0.5em}
+
+	\textbf{Loss:}
+	\begin{equation*}
+		\mathcal{L} = -\frac{1}{N} \sum_{i=1}^N \left[ w_1 y_i \log(\hat{y}_i) + w_0 (1 - y_i) \log(1 - \hat{y}_i) \right]
+	\end{equation*}
+
+
+\end{frame}
+
+\begin{frame}{Training Ingredients \emoji{shopping-cart}}
+	% \[
+	% 	\hat{A}_t = \tilde{D}_t^{-\frac{1}{2}} \tilde{A}_t \tilde{D}_t^{-\frac{1}{2}}, \quad \tilde{A}_t = A_t + I
+	% \]
+
+	% \vspace{1em}
 
 	\begin{columns}[c]
 		\column{0.5\textwidth}
@@ -283,6 +348,10 @@
 			\item Historical node features $[H_{t-k}, \ldots, H_{t-1}]$
 			\item Node masks for active nodes
 		\end{itemize}
+		\vspace{2em}
+		\begin{itemize}
+			\item Negative sampling considering only active nodes and history
+		\end{itemize}
 
 		\column{0.5\textwidth}
 		\centering
@@ -290,76 +359,12 @@
 		\begin{itemize}
 			\item Edge pairs $(u, v)$
 			\item Binary labels $y \in \{0, 1\}$
-			\item Negative sampling
 		\end{itemize}
+		\vspace{2em}
 	\end{columns}
 \end{frame}
 
-%------------------------------------------------
-\section{Modeling}
-%------------------------------------------------
-
-\begin{frame}{EvolveGCN Architecture}
-	\begin{columns}[c]
-		\column{0.55\textwidth}
-		\begin{block}{Key Innovation}
-			RNN evolves GCN parameters instead of node embeddings
-		\end{block}
-
-		\textbf{Graph Convolution:}
-		\[
-			H_t^{(l+1)} = \sigma(\hat{A}_t H_t^{(l)} W_t^{(l)})
-		\]
-
-		\textbf{Weight Evolution (EvolveGCN-H):}
-		\[
-			W_t^{(l)} = \text{GRU}(H_t^{(l)}, W_{t-1}^{(l)})
-		\]
-
-		\column{0.45\textwidth}
-		\begin{itemize}
-			\item Handles new nodes at test time
-			\item No requirement for static node sets
-			\item Captures temporal dynamics
-		\end{itemize}
-	\end{columns}
-\end{frame}
-
-\begin{frame}{GCN Architecture Details}
-	\begin{columns}[c]
-		\column{0.5\textwidth}
-		\textbf{GRCU Layers:}
-		\begin{itemize}
-			\item Layer 1: 768 $\rightarrow$ 128
-			\item Layer 2: 128 $\rightarrow$ 64
-		\end{itemize}
-
-		\vspace{0.5em}
-
-		\textbf{MLP Classifier:}
-		\begin{itemize}
-			\item Input: 128 (64 $\times$ 2 concatenated)
-			\item Output: 2 logits
-		\end{itemize}
-
-		\vspace{0.5em}
-
-		\textbf{Loss:}
-		\[
-			\mathcal{L} = -\frac{1}{N} \sum_{i=1}^N w_i \log(\hat{y}_i)
-		\]
-
-		\column{0.5\textwidth}
-		\begin{alertblock}{Top-K Selection}
-			\[
-				\text{scores} = \frac{H_t^{(l)} \cdot s}{\|s\|}
-			\]
-			Select most relevant embeddings for weight evolution
-		\end{alertblock}
-	\end{columns}
-\end{frame}
-
-\begin{frame}{Training Pipelines}
+\begin{frame}{Training Pipelines \emoji{repeat}}
 	\begin{columns}[t]
 		\column{0.48\textwidth}
 		\begin{block}{Original Implementation}
@@ -385,110 +390,188 @@
 	\vspace{1em}
 
 	\centering
-	\textbf{Configurations:} LR $\in \{0.001, 0.0005\}$, NM $\in \{1, 2\}$
+	\textbf{Configurations:} Learning Rate $\in \{0.001, 0.0005\}$, Negative Multiplier $\in \{1, 2\}$
 \end{frame}
 
 %------------------------------------------------
 \section{Evaluation}
 %------------------------------------------------
 
-\begin{frame}{Classification Results}
+\begin{frame}{Classification Metrics \emoji{abacus}}
+	\begin{columns}[t]
+		\column{0.5\textwidth}
+		\begin{block}{MAP (Mean Average Precision)}
+			\[
+				\mathrm{MAP}=\frac{1}{Q}\sum_{q=1}^Q\mathrm{AP}(q)
+			\]
+			Mean of per-query average precisions; ranking quality metric.
+		\end{block}
+
+		\begin{block}{AUC-ROC}
+			\[
+				\mathrm{AUC} = \frac{1}{N_1 N_0} \sum_{i=1}^{N_1} \sum_{j=1}^{N_0} \mathbb{I}(p_i > p_j)
+			\]
+			Prob.\ that a positive ranks higher than a negative.
+		\end{block}
+
+		\column{0.5\textwidth}
+		\begin{block}{Macro Metrics}
+			\footnotesize
+			\textbf{Precision:}
+			\[
+				\frac{1}{C}\sum_{c=1}^C\frac{\mathrm{TP}_c}{\mathrm{TP}_c+\mathrm{FP}_c}
+			\]
+			\textbf{Recall:}
+			\[
+				\frac{1}{C}\sum_{c=1}^C\frac{\mathrm{TP}_c}{\mathrm{TP}_c+\mathrm{FN}_c}
+			\]
+			\textbf{F1:}
+			\[
+				\frac{2 \cdot \mathrm{Precision} \cdot \mathrm{Recall}}{\mathrm{Precision} + \mathrm{Recall}}
+			\]
+		\end{block}
+	\end{columns}
+\end{frame}
+
+\begin{frame}{Graph Structure Metrics \emoji{abacus}}
+	\begin{columns}[t]
+		\column{0.5\textwidth}
+		\begin{block}{Average Degree}
+			\[
+				\text{AvgDeg} = \frac{|E|}{|V|}
+			\]
+			Mean connections per node; density indicator.
+		\end{block}
+
+		\begin{block}{Clustering Coefficient}
+			\[
+				C_i = \frac{2e_i}{k_i(k_i-1)}
+			\]
+			Local transitivity; triangle closure tendency.
+		\end{block}
+
+		\column{0.5\textwidth}
+		\begin{block}{Average Path Length}
+			\[
+				\text{AvgSP} = \frac{1}{|P|}\sum_{(i,j)} d(i,j)
+			\]
+			Typical node distance; testing the small-world property.
+		\end{block}
+
+		\begin{block}{Modularity}
+			\[
+				Q = \frac{1}{2m}\sum_{ij}\left(A_{ij} - \frac{k_i k_j}{2m}\right)\delta(c_i, c_j)
+			\]
+			Community structure quality ($-1$ to $1$).
+		\end{block}
+	\end{columns}
+\end{frame}
+
+\begin{frame}{Classification Results \emoji{bar-chart}}
 	\begin{table}
 		\centering
 		\footnotesize
 		\begin{tabular}{llcccccc}
 			\toprule
-			 & \textbf{LR} & \textbf{NM} & \textbf{MAP}  & \textbf{AUC} & \textbf{Prec.} & \textbf{Rec.} & \textbf{F1}   \\
+			 & \textbf{LR} & \textbf{NM} & \textbf{MAP}  & \textbf{AUC}  & \textbf{Mac P} & \textbf{Mac R} & \textbf{Mac F1} \\
 			\midrule
-			\multirow{4}{*}{\rotatebox{90}{\textbf{Incr.}}}
-			 & 0.001       & 1           & 0.78          & 0.78         & 0.25           & 0.49          & 0.33          \\
-			 & 0.001       & 2           & 0.64          & 0.74         & 0.75           & 0.68          & 0.69          \\
-			 & 0.0005      & 1           & 0.78          & 0.80         & 0.68           & 0.52          & 0.38          \\
-			 & 0.0005      & 2           & 0.62          & 0.72         & 0.73           & 0.68          & 0.69          \\
+			\multirow{4}{*}{\rotatebox{90}{\textcolor{drawblue}{\textbf{Incr.}}}}
+			 & 0.001       & 1           & 0.78          & 0.78          & 0.25           & 0.49           & 0.33            \\
+			 & 0.001       & 2           & 0.64          & 0.74          & 0.75           & 0.68           & 0.69            \\
+			 & 0.0005      & 1           & 0.78          & \textbf{0.80} & 0.68           & 0.52           & 0.38            \\
+			 & 0.0005      & 2           & 0.62          & 0.72          & 0.73           & 0.68           & 0.69            \\
 			\midrule
-			\multirow{4}{*}{\rotatebox{90}{\textbf{Orig.}}}
-			 & 0.001       & 1           & \textbf{0.87} & 0.63         & \textbf{0.86}  & \textbf{0.86} & \textbf{0.86} \\
-			 & 0.001       & 2           & 0.77          & 0.65         & 0.82           & 0.83          & 0.83          \\
-			 & 0.0005      & 1           & 0.86          & 0.64         & 0.82           & 0.79          & 0.78          \\
-			 & 0.0005      & 2           & 0.76          & 0.65         & 0.81           & 0.84          & 0.81          \\
+			\multirow{4}{*}{\rotatebox{90}{\textcolor{drawred}{\textbf{Orig.}}}}
+			 & 0.001       & 1           & \textbf{0.87} & 0.63          & \textbf{0.86}  & \textbf{0.86}  & \textbf{0.86}   \\
+			 & 0.001       & 2           & 0.77          & 0.65          & 0.82           & 0.83           & 0.83            \\
+			 & 0.0005      & 1           & 0.86          & 0.64          & 0.82           & 0.79           & 0.78            \\
+			 & 0.0005      & 2           & 0.76          & 0.65          & 0.81           & 0.84           & 0.81            \\
 			\bottomrule
 		\end{tabular}
 	\end{table}
 
 	\vspace{0.5em}
 	\centering
-	\footnotesize
-	\textit{Incr. = Incremental, Orig. = Original, LR = Learning Rate, NM = Negative Multiplier}
+	\textit{Incr. = \textcolor{drawblue}{\textbf{Incremental}}, Orig. = \textcolor{drawred}{\textbf{Original}}, LR = Learning Rate, NM = Negative Multiplier}
 \end{frame}
 
-\begin{frame}{Per-Class Metrics}
+\begin{frame}{Per-Class Metrics \emoji{bar-chart}}
 	\begin{table}
 		\centering
 		\footnotesize
 		\begin{tabular}{llcccccccc}
 			\toprule
-			 & \textbf{LR} & \textbf{NM} & \multicolumn{3}{c}{\textbf{Class 0 (Non-link)}} & \multicolumn{3}{c}{\textbf{Class 1 (Link)}}                             \\
+			 & \textbf{LR} & \textbf{NM} & \multicolumn{3}{c}{\textbf{Class 0 (Non-link)}} & \multicolumn{3}{c}{\textbf{Class 1 (Link)}}                                                                 \\
 			\cmidrule(lr){4-6} \cmidrule(lr){7-9}
-			 &             &             & P                                               & R                                           & F1   & P    & R    & F1   \\
+			 &             &             & P                                               & R                                           & F1            & P             & R             & F1            \\
 			\midrule
-			\multirow{4}{*}{\rotatebox{90}{\textbf{Incr.}}}
-			 & 0.001       & 1           & 0.00                                            & 0.00                                        & 0.00 & 0.49 & 0.97 & 0.65 \\
-			 & 0.001       & 2           & 0.77                                            & 0.92                                        & 0.83 & 0.73 & 0.44 & 0.55 \\
-			 & 0.0005      & 1           & 0.85                                            & 0.04                                        & 0.08 & 0.51 & 0.99 & 0.67 \\
-			 & 0.0005      & 2           & 0.77                                            & 0.90                                        & 0.83 & 0.69 & 0.47 & 0.56 \\
+			\multirow{4}{*}{\rotatebox{90}{\textcolor{drawblue}{\textbf{Incr.}}}}
+			 & 0.001       & 1           & 0.00                                            & 0.00                                        & 0.00          & 0.49          & 0.97          & 0.65          \\
+			 & 0.001       & 2           & 0.77                                            & \textbf{0.92}                               & 0.83          & 0.73          & 0.44          & 0.55          \\
+			 & 0.0005      & 1           & 0.85                                            & 0.04                                        & 0.08          & 0.51          & \textbf{0.99} & 0.67          \\
+			 & 0.0005      & 2           & 0.77                                            & 0.90                                        & 0.83          & 0.69          & 0.47          & 0.56          \\
 			\midrule
-			\multirow{4}{*}{\rotatebox{90}{\textbf{Orig.}}}
-			 & 0.001       & 1           & 0.89                                            & 0.83                                        & 0.86 & 0.84 & 0.89 & 0.87 \\
-			 & 0.001       & 2           & 0.89                                            & 0.88                                        & 0.88 & 0.76 & 0.78 & 0.77 \\
-			 & 0.0005      & 1           & 0.93                                            & 0.62                                        & 0.74 & 0.71 & 0.96 & 0.82 \\
-			 & 0.0005      & 2           & 0.95                                            & 0.76                                        & 0.84 & 0.66 & 0.93 & 0.77 \\
+			\multirow{4}{*}{\rotatebox{90}{\textcolor{drawred}{\textbf{Orig.}}}}
+			 & 0.001       & 1           & 0.89                                            & 0.83                                        & 0.86          & \textbf{0.84} & 0.89          & \textbf{0.87} \\
+			 & 0.001       & 2           & 0.89                                            & 0.88                                        & \textbf{0.88} & 0.76          & 0.78          & 0.77          \\
+			 & 0.0005      & 1           & 0.93                                            & 0.62                                        & 0.74          & 0.71          & 0.96          & 0.82          \\
+			 & 0.0005      & 2           & \textbf{0.95}                                   & 0.76                                        & 0.84          & 0.66          & 0.93          & 0.77          \\
 			\bottomrule
 		\end{tabular}
 	\end{table}
+	\textit{Incr. = \textcolor{drawblue}{\textbf{Incremental}}, Orig. = \textcolor{drawred}{\textbf{Original}}, LR = Learning Rate, NM = Negative Multiplier}
 
-	\vspace{0.3em}
-	\footnotesize
-	\begin{itemize}
-		\item Original: balanced class prediction across all configs
-		\item Incremental (NM=1): severe class imbalance, predicts mostly Class 1
-	\end{itemize}
 \end{frame}
 
-\begin{frame}{GCN Embeddings: Original Implementation}
-	\centering
-	\includegraphics[width=0.95\textwidth]{gab_loocv_c1_1_gcn_visualization.png}
-\end{frame}
-
-\begin{frame}{GCN Embeddings: Incremental Implementation}
-	\centering
-	\includegraphics[width=0.95\textwidth]{gab_h_c1_1_50_gcn_visualization.png}
-\end{frame}
-
-\begin{frame}{All Configurations: Original}
-	\centering
-	\includegraphics[width=0.85\textwidth]{gab_loocv_c1_2_gcn_visualization.png}
-\end{frame}
-
-\begin{frame}{All Configurations: Incremental}
-	\centering
-	\includegraphics[width=0.85\textwidth]{gab_h_c2_1_50_gcn_visualization.png}
-\end{frame}
-
-\begin{frame}{PCA Statistics}
+\begin{frame}{Graph Metrics Comparison \emoji{link}}
 	\begin{table}
 		\centering
-		\scriptsize
+		\begin{tabular}{lcccc}
+			\toprule
+			\textbf{Network}                                      & \textbf{Avg Deg} & \textbf{Mod.} & \textbf{Avg Path} & \textbf{Clust.} \\
+			\midrule
+			Facebook                                              & 43.69            & 0.83          & 3.62              & 0.61            \\
+			Twitter                                               & 21.75            & 0.80          & 4.90              & 0.57            \\
+			Google+                                               & 127.06           & 0.47          & 3.32              & 0.49            \\
+			\textbf{Gab (Ours)}                                   & 32.11            & 0.27          & 3.04              & 0.08            \\
+			\midrule
+			\textcolor{drawblue}{\textbf{Incr.}}, LR=0.0005, NM=1 & 220.35           & -0.001        & 1.02              & 0.59            \\
+			\bottomrule
+		\end{tabular}
+	\end{table}
+	\textit{Avg Deg = Average Degree, Mod. = Modularity, Avg Path = Average Path Length, Clust. = Clustering Coefficient}
+\end{frame}
+
+% \begin{frame}{GCN Embeddings: \textcolor{drawred}{\textbf{Original}} Implementation}
+% 	\centering
+% 	\includegraphics[width=\textwidth]{gab_loocv_c1_1_gcn_visualization.png}
+% \end{frame}
+
+% \begin{frame}{GCN Embeddings: \textcolor{drawblue}{\textbf{Incremental}} Implementation}
+% 	\centering
+% 	\includegraphics[width=\textwidth]{gab_h_c1_1_50_gcn_visualization.png}
+% \end{frame}
+
+% \begin{frame}{All Configurations: \textcolor{drawred}{\textbf{Original}} \emoji{four-leaf-clover}}
+% 	\centering
+% 	\includegraphics[width=\textwidth]{gab_loocv_c1_2_gcn_visualization.png}
+% \end{frame}
+
+
+\begin{frame}{PCA Statistics \emoji{bar-chart}}
+	\begin{table}
+		\centering
 		\begin{tabular}{llcccc}
 			\toprule
 			 & \textbf{Config} & \textbf{PC1} & \textbf{PC2} & \textbf{Total} & \textbf{Centroid} \\
 			\midrule
-			\multirow{4}{*}{\rotatebox{90}{\textbf{Orig.}}}
+			\multirow{4}{*}{\rotatebox{90}{\textcolor{drawred}{\textbf{Orig.}}}}
 			 & LR=0.001, NM=1  & 99.98\%      & 0.01\%       & 100.00\%       & 6.29              \\
 			 & LR=0.001, NM=2  & 99.71\%      & 0.23\%       & 99.94\%        & 2.33              \\
 			 & LR=0.0005, NM=1 & 95.99\%      & 3.39\%       & 99.38\%        & 2.06              \\
 			 & LR=0.0005, NM=2 & 99.96\%      & 0.03\%       & 100.00\%       & 6.65              \\
 			\midrule
-			\multirow{4}{*}{\rotatebox{90}{\textbf{Incr.}}}
+			\multirow{4}{*}{\rotatebox{90}{\textcolor{drawblue}{\textbf{Incr.}}}}
 			 & LR=0.001, NM=1  & 99.65\%      & 0.21\%       & 99.86\%        & 1.01              \\
 			 & LR=0.001, NM=2  & 99.39\%      & 0.57\%       & 99.96\%        & 3.41              \\
 			 & LR=0.0005, NM=1 & 76.13\%      & 22.61\%      & 98.74\%        & 3.84              \\
@@ -496,74 +579,26 @@
 			\bottomrule
 		\end{tabular}
 	\end{table}
-
-	\vspace{0.3em}
-	\begin{alertblock}{Key Finding}
-		Original: Dimensional collapse (PC1 $\approx$ 96-100\%)\\
-		Incremental (LR=0.0005, NM=1): Richer embedding space (PC1 = 76\%)
-	\end{alertblock}
 \end{frame}
 
-\begin{frame}{Graph Metrics Comparison}
-	\begin{table}
-		\centering
-		\begin{tabular}{lcccc}
-			\toprule
-			\textbf{Network}                & \textbf{Avg Deg} & \textbf{Mod.} & \textbf{Avg Path} & \textbf{Clust.} \\
-			\midrule
-			Facebook                        & 43.69            & 0.83          & 3.62              & 0.61            \\
-			Twitter                         & 21.75            & 0.80          & 4.90              & 0.57            \\
-			Google+                         & 127.06           & 0.47          & 3.32              & 0.49            \\
-			\textbf{Gab (Ours)}             & 32.11            & 0.27          & 3.04              & 0.08            \\
-			\midrule
-			Synthetic (Incr. LR=.0005 NM=1) & 220.35           & -0.001        & 1.02              & 0.59            \\
-			\bottomrule
-		\end{tabular}
-	\end{table}
-
-	\vspace{0.5em}
-	\begin{itemize}
-		\item Synthetic: over-dense, no community structure (modularity $\approx$ 0)
-		\item Gab: lower clustering than mainstream networks
-	\end{itemize}
+\begin{frame}{PCA Statistics \emoji{bar-chart}}
+	\centering
+	\includegraphics[width=\textwidth]{gab_h_c2_1_50_gcn_visualization.png}
 \end{frame}
 
-\begin{frame}{Key Observations}
-	\begin{columns}[c]
-		\column{0.5\textwidth}
-		\begin{block}{Original Implementation}
-			\begin{itemize}
-				\item Best MAP: 0.87
-				\item Best F1: 0.86
-				\item Severe oversmoothing
-				\item No synthetic connections
-			\end{itemize}
-		\end{block}
 
-		\column{0.5\textwidth}
-		\begin{block}{Incremental Implementation}
-			\begin{itemize}
-				\item Best AUC: 0.80
-				\item Richer embeddings
-				\item Attempts synthetic links
-				\item Poor structural fidelity
-			\end{itemize}
-		\end{block}
-	\end{columns}
-\end{frame}
 
 %------------------------------------------------
 \section{Conclusion}
 %------------------------------------------------
 
-\begin{frame}{Achievement of Goals}
+\begin{frame}{Overall Assessment}
 	\begin{columns}[c]
 		\column{0.5\textwidth}
 		\begin{exampleblock}{Achieved}
 			\begin{itemize}
 				\item Temporal link prediction model
 				\item Quantitative evaluation
-				\item Embedding space analysis
 			\end{itemize}
 		\end{exampleblock}
 
@@ -577,40 +612,29 @@
 	\end{columns}
 \end{frame}
 
-\begin{frame}{Limitations}
-	\begin{enumerate}
-		\item \textbf{Embedding Mismatch}: Synthetic users too homogeneous (variance ratio 11.23$\times$)
-
-		\item \textbf{Oversmoothing}: Dimensional collapse in GCN layers
-
-		\item \textbf{Cumulative Edge Assumption}: Does not reflect unfollowing behavior
-	\end{enumerate}
-
-	\vspace{1em}
-
-	\centering
-	\includegraphics[width=0.6\textwidth]{user_embeddings_visualization.png}
-\end{frame}
-
 \begin{frame}{Future Work}
 	\begin{enumerate}
-		\item \textbf{Mitigate Oversmoothing}
+		\item \textbf{Synthetic Data Improvement}
 		      \begin{itemize}
-			      \item Jumping knowledge networks
-			      \item APPNP-style propagation
-			      \item Fewer GCN layers
+			      \item Generate synthetic posts with more diverse prompts
+			      \item Apply embedding perturbation techniques to increase variance
+			      \item Reduce isolation of synthetic users in embedding space
 		      \end{itemize}
 
-		\item \textbf{Improve Synthetic Data}
+		      \vspace{0.3em}
+
+		\item \textbf{Test Other Models}
 		      \begin{itemize}
-			      \item Diverse generation prompts
-			      \item Embedding perturbation
+			      \item Explore alternative temporal graph models
 		      \end{itemize}
 
-		\item \textbf{Alternative Models}
+		      \vspace{0.3em}
+
+		\item \textbf{Explore New Metrics}
 		      \begin{itemize}
-			      \item Other temporal GNN architectures
-			      \item Attention-based approaches
+			      \item Custom loss functions for synthetic user link prediction
+			      \item Penalize embedding isolation
+			      \item Encourage diversity in synthetic representations
 		      \end{itemize}
 	\end{enumerate}
 \end{frame}
@@ -618,7 +642,6 @@
 \begin{frame}
 	\Huge{\centerline{\textbf{Thank You} \emoji{rocket}}}
 	\vspace{1em}
-	\large{\centerline{Questions?}}
 \end{frame}
 
 %----------------------------------------------------------------------------------------

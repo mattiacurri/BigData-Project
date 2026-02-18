@@ -137,25 +137,25 @@ The MLP architecture is:
 	\item \textbf{Output layer}: 2 logits (edge exists / edge does not exist)
 \end{itemize}
 
-The classifier outputs probability scores for edge existence, trained with binary cross-entropy loss using balanced class weights $[0.5, 0.5]$ to handle the imbalance between positive and negative edge samples:
+The classifier outputs probability scores for edge existence, trained with \textbf{binary cross-entropy loss} using balanced class weights $[0.5, 0.5]$:
 
 \begin{equation}
 	\mathcal{L} = -\frac{1}{N} \sum_{i=1}^N \left[ w_1 y_i \log(\hat{y}_i) + w_0 (1 - y_i) \log(1 - \hat{y}_i) \right]
 \end{equation}
 
-\subsection*{Experiment Design: Training Protocol}
+\subsection{Training Protocol}
 
 In this project, we implemented two distinct training pipelines using the H variant of the EvolveGCN architecture:
 
 \begin{itemize}
-	\item \textbf{Original Implementation}: Sequence-based training where all snapshots are processed in a single batch per epoch
-	\item \textbf{Incremental Implementation}: Phase-based training where each snapshot is processed in a dedicated training phase
+	\item \textcolor{drawred}{\textbf{Original Implementation}}: Sequence-based training where all snapshots are processed in a single batch per epoch
+	\item \textcolor{drawblue}{\textbf{Incremental Implementation}}: Phase-based training where each snapshot is processed in a dedicated training phase
 \end{itemize}
 
-\subsection*{Original Implementation}
+\subsubsection*{Original Implementation}
 \label{sec:original}
 
-This pipeline follows the reference implementation of EvolveGCN.\\ Given $n$ training snapshots $\{S_0, S_1, \dots, S_{n-1}\}$:
+This pipeline follows the reference implementation of EvolveGCN. Given $n$ training snapshots $\{S_0, S_1, \dots, S_{n-1}\}$:
 
 \begin{itemize}
 	\item \textbf{Batch Composition}: Each training batch contains all $n$ snapshots. The model processes the entire temporal sequence in a single forward pass.
@@ -163,16 +163,16 @@ This pipeline follows the reference implementation of EvolveGCN.\\ Given $n$ tra
 	\item \textbf{Training Loop}: For $E$ epochs, the model repeatedly sees the same sequence of snapshots, learning to predict edges at each time step based on historical context.
 \end{itemize}
 
-% For example, with 4 training snapshots:
-% \begin{enumerate}
-% 	\item Epoch 1: Process $[S_0, S_1, S_2, S_3]$ as a single batch
-% 	\item Epoch 2: Process $[S_0, S_1, S_2, S_3]$ again
-% 	\item ... continue for $E$ epochs
-% \end{enumerate}
+For example, with 4 training snapshots:
+\begin{enumerate}
+	\item Epoch 1: Process $[S_0, S_1, S_2, S_3]$ as a single batch
+	\item Epoch 2: Process $[S_0, S_1, S_2, S_3]$ again
+	\item ... continue for $E$ epochs
+\end{enumerate}
 
-The best final model, chosen according to the MAP metric on the last training snapshot, is used for inference on synthetic data.
+% The best final model, chosen according to the MAP metric on the last training snapshot, is used for inference on synthetic data.
 
-\subsection*{Incremental Implementation}
+\subsubsection*{Incremental Implementation}
 \label{sec:incremental}
 
 Given $n$ training snapshots, the training is divided into $n$ distinct phases. Each phase $i$ is dedicated to a single snapshot $S_i$:
@@ -203,8 +203,44 @@ For the \textbf{Original Implementation}, 50 epochs are used to train on the ent
 
 A more aggressive negative sampling strategy is not explored due to the significant dimension of the dataset and the computational cost of training.
 
+\subsection{Generating the synthetic network}
+
+To generate the synthetic network, the pipeline will be as follows:
+
+\begin{enumerate}
+	\item \textbf{Model Loading}: Load the trained EvolveGCN-H model from the final checkpoint.
+
+	\item \textbf{Real Graph Construction}: Load the real Gab network up to the final snapshot, including:
+	      \begin{itemize}
+		      \item Adjacency matrix with all historical edges
+		      \item Node features (BERT embeddings) for all 25,569 real users
+	      \end{itemize}
+
+	\item \textbf{Synthetic Data Loading}: Load pre-computed BERT embeddings for synthetic users. Synthetic users are distributed across 3 batches (400, 400, and 200 users, totaling 1,000 synthetic users), that emulate the temporal distribution of user creation.
+
+	\item \textbf{Incremental Batch Processing}: For each batch of synthetic users:
+	      \begin{enumerate}
+		      \item \textit{User Embedding Computation}: Compute each synthetic user's embedding as the average of their post embeddings.
+		      \item \textit{Graph Construction}: Build an adjacency matrix combining:
+		            \begin{itemize}
+			            \item Real edges from the Gab network
+			            \item Self-loops for all synthetic nodes (to ensure GCN can process isolated nodes)
+		            \end{itemize}
+		      \item \textit{GCN Embedding}: Compute node embeddings for all nodes (real + synthetic) using the trained GCN.
+		      \item \textit{Link Prediction}: Predict probabilities for candidate edges in three categories:
+		            \begin{itemize}
+			            \item New synthetic $\rightarrow$ all nodes (real, old synthetic, new synthetic)
+			            \item Real $\rightarrow$ new synthetic
+			            \item Old synthetic $\rightarrow$ new synthetic
+		            \end{itemize}
+		      \item \textit{Thresholding}: Classify edges as positive if prediction probability $\geq 0.5$.
+	      \end{enumerate}
+\end{enumerate}
+
 
 \section{Generate Test Design}
+
+\subsection{Classification metrics}
 
 As \textbf{classification metrics}, we will use:
 
@@ -224,6 +260,8 @@ As \textbf{classification metrics}, we will use:
 	\item \textbf{Per-class metrics:} Precision, Recall and F1 reported individually for each class to inspect class-level behavior.
 \end{itemize}
 
+
+\subsection{Graph structure metrics}
 To \textbf{evaluate the graph structure}, we will use:
 
 \begin{itemize}
@@ -258,36 +296,4 @@ We will compare the final cumulative graph provided by the dataset with the synt
 
 We want to analyze the structural properties of the generated graph on the synthetic dataset. The ideal result will be a network that resembles the real cumulative graph in terms of degree distribution, clustering coefficient, average path length, and modularity. The other datasets will give context on whether eventual different metrics are still valuable and encountered on other real social networks.
 
-To generate the synthetic network, the pipeline will be as follows:
-
-\begin{enumerate}
-	\item \textbf{Model Loading}: Load the trained EvolveGCN-H model from the final checkpoint (phase 4) of the incremental training pipeline. The model includes both the GCN component (with evolved weights) and the MLP classifier for edge prediction.
-
-	\item \textbf{Real Graph Construction}: Load the real Gab network up to the final snapshot, including:
-	      \begin{itemize}
-		      \item Adjacency matrix with all historical edges
-		      \item Node features (BERT embeddings) for all 25,569 real users
-	      \end{itemize}
-
-	\item \textbf{Synthetic Data Loading}: Load pre-computed BERT embeddings for synthetic users. Synthetic users are distributed across 3 batches (400, 400, and 200 users, totaling 1,000 synthetic users).
-
-	\item \textbf{Incremental Batch Processing}: For each batch of synthetic users:
-	      \begin{enumerate}
-		      \item \textit{User Embedding Computation}: Compute each synthetic user's embedding as the average of their post embeddings.
-		      \item \textit{Hybrid Graph Construction}: Build an adjacency matrix combining:
-		            \begin{itemize}
-			            \item Real edges from the Gab network
-			            \item Self-loops for all synthetic nodes (to ensure GCN can process isolated nodes)
-		            \end{itemize}
-		      \item \textit{Feature Matrix Assembly}: Concatenate real node features with cumulative synthetic user embeddings.
-		      \item \textit{GCN Embedding}: Compute node embeddings for all nodes (real + synthetic) using the trained GCN.
-		      \item \textit{Edge Prediction}: Predict probabilities for candidate edges in three categories:
-		            \begin{itemize}
-			            \item New synthetic $\rightarrow$ all nodes (real, old synthetic, new synthetic)
-			            \item Real $\rightarrow$ new synthetic
-			            \item Old synthetic $\rightarrow$ new synthetic
-		            \end{itemize}
-		      \item \textit{Thresholding}: Classify edges as positive if prediction probability $\geq 0.5$.
-	      \end{enumerate}
-\end{enumerate}
 

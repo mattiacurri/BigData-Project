@@ -267,12 +267,14 @@ class Logger:
             + " measures macroavg - precision %0.4f - recall %0.4f - f1 %0.4f "
             % (precision, recall, f1)
         )
-        if str(self.args.target_class) == "AVG":
-            if self.args.target_measure == "Precision" or self.args.target_measure == "prec":
+        if self.args.target_measure in ["macro_f1", "Macro_F1", "MACRO_F1"]:
+            eval_measure = f1
+        elif str(self.args.target_class) == "AVG":
+            if self.args.target_measure in ["Precision", "prec"]:
                 eval_measure = precision
-            elif self.args.target_measure == "Recall" or self.args.target_measure == "rec":
+            elif self.args.target_measure in ["Recall", "rec"]:
                 eval_measure = recall
-            else:
+            elif self.args.target_measure in ["f1", "F1"]:
                 eval_measure = f1
 
         for cl in range(self.num_classes):
@@ -285,13 +287,23 @@ class Logger:
                 % (cl, cl_precision, cl_recall, cl_f1)
             )
             if str(cl) == str(self.args.target_class):
-                if self.args.target_measure in ["MAP", "map", "AUC", "auc", "Loss", "loss"]:
+                if self.args.target_measure in [
+                    "MAP",
+                    "map",
+                    "AUC",
+                    "auc",
+                    "Loss",
+                    "loss",
+                    "macro_f1",
+                    "Macro_F1",
+                    "MACRO_F1",
+                ]:
                     pass
-                elif self.args.target_measure == "Precision" or self.args.target_measure == "prec":
+                elif self.args.target_measure in ["Precision", "prec"]:
                     eval_measure = cl_precision
-                elif self.args.target_measure == "Recall" or self.args.target_measure == "rec":
+                elif self.args.target_measure in ["Recall", "rec"]:
                     eval_measure = cl_recall
-                else:
+                elif self.args.target_measure in ["f1", "F1"]:
                     eval_measure = cl_f1
 
         logging.info(self.set + " Total epoch time: " + str((time.monotonic() - self.ep_time)))

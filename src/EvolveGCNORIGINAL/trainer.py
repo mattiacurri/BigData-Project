@@ -104,7 +104,7 @@ class Trainer:
             if len(self.splitter.dev) > 0:
                 eval_valid, _ = self.run_epoch(self.splitter.dev, e, "VALID", grad=False)
                 valid_measures.append((e, eval_valid))
-                print(f"MAP after VALID epoch {e}: {eval_valid}")
+                print(f"{self.args.target_measure} after VALID epoch {e}: {eval_valid}")
                 print(f"eval_valid: {eval_valid}, best_Eval_Valid: {best_eval_valid}")
                 if eval_valid > best_eval_valid:
                     best_eval_valid = eval_valid
@@ -143,7 +143,7 @@ class Trainer:
                 split_mode = getattr(self.args, "split_mode", "proportion")
                 if split_mode != "loocv":
                     eval_test, _ = self.run_epoch(self.splitter.test, e, "TEST", grad=False)
-                    print(f"MAP after TEST epoch {e}: {eval_test}")
+                    print(f"{self.args.target_measure} after TEST epoch {e}: {eval_test}")
 
                 # if self.args.save_node_embeddings:
                 # 	self.save_node_embs_csv(nodes_embs, self.splitter.train_idx, f"{log_file}_train_nodeembs_{e}.csv.gz")

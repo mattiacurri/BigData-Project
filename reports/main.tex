@@ -180,6 +180,18 @@ skipabove=1.2\baselineskip,
 % \captionsetup[table]{margin=1.5cm,font=small,labelfont={bf},name={Table},labelsep=colon,textfont={it}}
 
 \input{front}
+
+\chapter*{Abstract}
+\addcontentsline{toc}{chapter}{Abstract}
+
+Social network analysis has become essential for understanding modern online communities, with temporal link prediction emerging as a key technique for modeling evolving user relationships. This project develops a temporal link prediction system using EvolveGCN to predict future connections between users based on historical interactions and to generate synthetic social network structures.
+
+Two training pipelines were implemented and evaluated: an Original (sequence-based) approach processing all snapshots in a single batch, and an Incremental (phase-based) approach training on one snapshot per phase. Experiments were conducted on the Gab dataset spanning 2016--2025, with BERT embeddings as node features. Results show that the Original implementation achieves superior ranking performance (MAP=0.87, Macro F1=0.86), while the Incremental approach demonstrates better discrimination ability (AUC=0.80).
+
+The application to synthetic data revealed significant challenges: the model fails to generalize to synthetic users due to the homogeneity of synthetic BERT embeddings, resulting in unrealistic network structures with excessive density and absent community structure. These findings highlight the need for improved synthetic data generation techniques and custom loss functions to address embedding distribution mismatch.
+
+The code is available on GitHub: \url{https://github.com/mattiacurri/BigData-Project}.
+
 \restoregeometry
 \pagestyle{empty}
 {
