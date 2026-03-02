@@ -28,7 +28,6 @@ dependencies = [
     "tqdm>=4.67.1",
     "torch-geometric>=2.7.0",
     "wandb>=0.24.1",
-    "trimap>=1.0.0",
     "networkx>=3.6.1",
 ]
 requires-python = "~=3.12.0"
